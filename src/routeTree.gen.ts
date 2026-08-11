@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedEscanearRouteImport } from './routes/_authenticated/escanear'
+import { Route as AuthenticatedHistorialRouteImport } from './routes/_authenticated/historial'
 import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
 import { Route as AuthenticatedVerificarIdRouteImport } from './routes/_authenticated/verificar.$id'
 
@@ -35,6 +36,11 @@ const AuthenticatedEscanearRoute = AuthenticatedEscanearRouteImport.update({
   path: '/escanear',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedHistorialRoute = AuthenticatedHistorialRouteImport.update({
+  id: '/historial',
+  path: '/historial',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const AuthenticatedInicioRoute = AuthenticatedInicioRouteImport.update({
   id: '/inicio',
   path: '/inicio',
@@ -51,6 +57,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/escanear': typeof AuthenticatedEscanearRoute
+  '/historial': typeof AuthenticatedHistorialRoute
   '/inicio': typeof AuthenticatedInicioRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
@@ -58,6 +65,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/escanear': typeof AuthenticatedEscanearRoute
+  '/historial': typeof AuthenticatedHistorialRoute
   '/inicio': typeof AuthenticatedInicioRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
@@ -67,20 +75,23 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/_authenticated/escanear': typeof AuthenticatedEscanearRoute
+  '/_authenticated/historial': typeof AuthenticatedHistorialRoute
   '/_authenticated/inicio': typeof AuthenticatedInicioRoute
   '/_authenticated/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/escanear' | '/inicio' | '/verificar/$id'
+  fullPaths:
+    '/' | '/auth' | '/escanear' | '/historial' | '/inicio' | '/verificar/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/escanear' | '/inicio' | '/verificar/$id'
+  to: '/' | '/auth' | '/escanear' | '/historial' | '/inicio' | '/verificar/$id'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/auth'
     | '/_authenticated/escanear'
+    | '/_authenticated/historial'
     | '/_authenticated/inicio'
     | '/_authenticated/verificar/$id'
   fileRoutesById: FileRoutesById
@@ -121,6 +132,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedEscanearRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/historial': {
+      id: '/_authenticated/historial'
+      path: '/historial'
+      fullPath: '/historial'
+      preLoaderRoute: typeof AuthenticatedHistorialRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/inicio': {
       id: '/_authenticated/inicio'
       path: '/inicio'
@@ -140,12 +158,14 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedEscanearRoute: typeof AuthenticatedEscanearRoute
+  AuthenticatedHistorialRoute: typeof AuthenticatedHistorialRoute
   AuthenticatedInicioRoute: typeof AuthenticatedInicioRoute
   AuthenticatedVerificarIdRoute: typeof AuthenticatedVerificarIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEscanearRoute: AuthenticatedEscanearRoute,
+  AuthenticatedHistorialRoute: AuthenticatedHistorialRoute,
   AuthenticatedInicioRoute: AuthenticatedInicioRoute,
   AuthenticatedVerificarIdRoute: AuthenticatedVerificarIdRoute,
 }
