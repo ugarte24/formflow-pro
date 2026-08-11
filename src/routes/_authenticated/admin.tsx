@@ -83,10 +83,16 @@ function Admin() {
   async function alternarAdmin(userId: string, esAdmin: boolean): Promise<void> {
     if (esAdmin) {
       const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
-      if (error) return toast.error(error.message);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
     } else {
       const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" });
-      if (error) return toast.error(error.message);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
     }
     queryClient.invalidateQueries({ queryKey: ["operadores"] });
   }
