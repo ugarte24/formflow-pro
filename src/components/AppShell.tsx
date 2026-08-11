@@ -14,9 +14,9 @@ export function AppShell({
 }: {
   children: ReactNode;
   titulo: string;
-  subtitulo?: string;
-  esAdmin?: boolean;
-  accion?: ReactNode;
+  subtitulo?: string | undefined;
+  esAdmin?: boolean | undefined;
+  accion?: ReactNode | undefined;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
