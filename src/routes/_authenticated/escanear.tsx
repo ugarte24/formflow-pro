@@ -17,7 +17,7 @@ export const Route = createFileRoute("/_authenticated/escanear")({
       { property: "og:description", content: "Captura el documento y extrae los datos automáticamente." },
     ],
   }),
-  component: Escanear;
+  component: Escanear,
 });
 
 type Calidad = { nitidez: number; luz: number; ok: boolean };
