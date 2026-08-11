@@ -14,16 +14,231 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      computers: {
+        Row: {
+          activo: boolean
+          agent_token: string
+          codigo: string
+          created_at: string
+          id: string
+          last_seen_at: string | null
+          nombre: string
+          updated_at: string
+        }
+        Insert: {
+          activo?: boolean
+          agent_token?: string
+          codigo: string
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          nombre: string
+          updated_at?: string
+        }
+        Update: {
+          activo?: boolean
+          agent_token?: string
+          codigo?: string
+          created_at?: string
+          id?: string
+          last_seen_at?: string | null
+          nombre?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      documents: {
+        Row: {
+          apellidos: string | null
+          avenida: string | null
+          barrio: string | null
+          captured_at: string
+          completed_at: string | null
+          computer_id: string | null
+          confianza: Json
+          created_at: string
+          error_message: string | null
+          estado_civil: string | null
+          fecha_nacimiento: string | null
+          genero: string | null
+          id: string
+          image_path: string | null
+          nombres: string | null
+          numero_documento: string | null
+          numero_puerta: string | null
+          operator_id: string
+          processing_ms: number | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["doc_status"]
+          updated_at: string
+        }
+        Insert: {
+          apellidos?: string | null
+          avenida?: string | null
+          barrio?: string | null
+          captured_at?: string
+          completed_at?: string | null
+          computer_id?: string | null
+          confianza?: Json
+          created_at?: string
+          error_message?: string | null
+          estado_civil?: string | null
+          fecha_nacimiento?: string | null
+          genero?: string | null
+          id?: string
+          image_path?: string | null
+          nombres?: string | null
+          numero_documento?: string | null
+          numero_puerta?: string | null
+          operator_id: string
+          processing_ms?: number | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["doc_status"]
+          updated_at?: string
+        }
+        Update: {
+          apellidos?: string | null
+          avenida?: string | null
+          barrio?: string | null
+          captured_at?: string
+          completed_at?: string | null
+          computer_id?: string | null
+          confianza?: Json
+          created_at?: string
+          error_message?: string | null
+          estado_civil?: string | null
+          fecha_nacimiento?: string | null
+          genero?: string | null
+          id?: string
+          image_path?: string | null
+          nombres?: string | null
+          numero_documento?: string | null
+          numero_puerta?: string | null
+          operator_id?: string
+          processing_ms?: number | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["doc_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "documents_computer_id_fkey"
+            columns: ["computer_id"]
+            isOneToOne: false
+            referencedRelation: "computers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operation_logs: {
+        Row: {
+          created_at: string
+          detalle: string | null
+          document_id: string | null
+          evento: string
+          id: string
+          operator_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          detalle?: string | null
+          document_id?: string | null
+          evento: string
+          id?: string
+          operator_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          detalle?: string | null
+          document_id?: string | null
+          evento?: string
+          id?: string
+          operator_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operation_logs_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          nombre_completo: string | null
+          telefono: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          nombre_completo?: string | null
+          telefono?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          nombre_completo?: string | null
+          telefono?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "operador"
+      doc_status:
+        | "capturado"
+        | "procesando"
+        | "datos_extraidos"
+        | "pendiente_revision"
+        | "confirmado"
+        | "enviado_pc"
+        | "formulario_completado"
+        | "registrado"
+        | "error_ocr"
+        | "error_conexion"
+        | "error_automatizacion"
+        | "error_sistema"
+        | "cancelado"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +365,23 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "operador"],
+      doc_status: [
+        "capturado",
+        "procesando",
+        "datos_extraidos",
+        "pendiente_revision",
+        "confirmado",
+        "enviado_pc",
+        "formulario_completado",
+        "registrado",
+        "error_ocr",
+        "error_conexion",
+        "error_automatizacion",
+        "error_sistema",
+        "cancelado",
+      ],
+    },
   },
 } as const
