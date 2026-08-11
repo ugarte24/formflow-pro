@@ -14,6 +14,7 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedEscanearRouteImport } from './routes/_authenticated/escanear'
 import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
+import { Route as AuthenticatedVerificarIdRouteImport } from './routes/_authenticated/verificar.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -39,18 +40,26 @@ const AuthenticatedInicioRoute = AuthenticatedInicioRouteImport.update({
   path: '/inicio',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedVerificarIdRoute =
+  AuthenticatedVerificarIdRouteImport.update({
+    id: '/verificar/$id',
+    path: '/verificar/$id',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/escanear': typeof AuthenticatedEscanearRoute
   '/inicio': typeof AuthenticatedInicioRoute
+  '/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
   '/escanear': typeof AuthenticatedEscanearRoute
   '/inicio': typeof AuthenticatedInicioRoute
+  '/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -59,12 +68,13 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/_authenticated/escanear': typeof AuthenticatedEscanearRoute
   '/_authenticated/inicio': typeof AuthenticatedInicioRoute
+  '/_authenticated/verificar/$id': typeof AuthenticatedVerificarIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/escanear' | '/inicio'
+  fullPaths: '/' | '/auth' | '/escanear' | '/inicio' | '/verificar/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/escanear' | '/inicio'
+  to: '/' | '/auth' | '/escanear' | '/inicio' | '/verificar/$id'
   id:
     | '__root__'
     | '/'
@@ -72,6 +82,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/_authenticated/escanear'
     | '/_authenticated/inicio'
+    | '/_authenticated/verificar/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -117,17 +128,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedInicioRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/verificar/$id': {
+      id: '/_authenticated/verificar/$id'
+      path: '/verificar/$id'
+      fullPath: '/verificar/$id'
+      preLoaderRoute: typeof AuthenticatedVerificarIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedEscanearRoute: typeof AuthenticatedEscanearRoute
   AuthenticatedInicioRoute: typeof AuthenticatedInicioRoute
+  AuthenticatedVerificarIdRoute: typeof AuthenticatedVerificarIdRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedEscanearRoute: AuthenticatedEscanearRoute,
   AuthenticatedInicioRoute: AuthenticatedInicioRoute,
+  AuthenticatedVerificarIdRoute: AuthenticatedVerificarIdRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
