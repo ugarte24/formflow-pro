@@ -16,6 +16,21 @@ dist-ssr
 .nitro
 *.local
 
+# Entorno / secretos — nunca subir a git
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+credentials.json
+service-account*.json
+
+# Agente Windows
+agent/.venv/
+agent/.env
+agent/downloads/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
