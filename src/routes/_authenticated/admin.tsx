@@ -80,7 +80,7 @@ function Admin() {
     else queryClient.invalidateQueries({ queryKey: ["computadores"] });
   }
 
-  async function alternarAdmin(userId: string, esAdmin: boolean) {
+  async function alternarAdmin(userId: string, esAdmin: boolean): Promise<void> {
     if (esAdmin) {
       const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
       if (error) return toast.error(error.message);
