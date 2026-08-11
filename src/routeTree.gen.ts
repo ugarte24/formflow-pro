@@ -19,6 +19,7 @@ import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated
 import { Route as AuthenticatedPerfilRouteImport } from './routes/_authenticated/perfil'
 import { Route as AuthenticatedVerificarIdRouteImport } from './routes/_authenticated/verificar.$id'
 import { Route as ApiPublicAgentePendientesRouteImport } from './routes/api/public/agente/pendientes'
+import { Route as ApiPublicAgenteResultadoRouteImport } from './routes/api/public/agente/resultado'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -71,6 +72,12 @@ const ApiPublicAgentePendientesRoute =
     path: '/api/public/agente/pendientes',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicAgenteResultadoRoute =
+  ApiPublicAgenteResultadoRouteImport.update({
+    id: '/api/public/agente/resultado',
+    path: '/api/public/agente/resultado',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -93,6 +101,7 @@ export interface FileRoutesByTo {
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -106,6 +115,7 @@ export interface FileRoutesById {
   '/_authenticated/perfil': typeof AuthenticatedPerfilRoute
   '/_authenticated/verificar/$id': typeof AuthenticatedVerificarIdRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/perfil'
     | '/verificar/$id'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/resultado'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/perfil'
     | '/verificar/$id'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/resultado'
   id:
     | '__root__'
     | '/'
@@ -142,6 +154,7 @@ export interface FileRouteTypes {
     | '/_authenticated/perfil'
     | '/_authenticated/verificar/$id'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/resultado'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -149,6 +162,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ApiPublicAgentePendientesRoute: typeof ApiPublicAgentePendientesRoute
+  ApiPublicAgenteResultadoRoute: typeof ApiPublicAgenteResultadoRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -223,6 +237,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicAgentePendientesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/agente/resultado': {
+      id: '/api/public/agente/resultado'
+      path: '/api/public/agente/resultado'
+      fullPath: '/api/public/agente/resultado'
+      preLoaderRoute: typeof ApiPublicAgenteResultadoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -252,6 +273,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ApiPublicAgentePendientesRoute: ApiPublicAgentePendientesRoute,
+  ApiPublicAgenteResultadoRoute: ApiPublicAgenteResultadoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
