@@ -1,0 +1,1 @@
+REVOKE SELECT (agent_token) ON public.computers FROM authenticated;
