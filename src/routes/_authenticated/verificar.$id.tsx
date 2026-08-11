@@ -1,0 +1,269 @@
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, Monitor } from "lucide-react";
+import { toast } from "sonner";
+import { AppShell } from "@/components/AppShell";
+import { supabase } from "@/integrations/supabase/client";
+import { useSesion } from "@/hooks/useSesion";
+import { CAMPOS, STATUS_META, TONE_CLASS, confianzaTone, type DocStatus } from "@/lib/document-fields";
+
+export const Route = createFileRoute("/_authenticated/verificar/$id")({
+  head: () => ({
+    meta: [
+      { title: "Verificar datos extraídos — Digitalizador" },
+      { name: "description", content: "Revisa y corrige los datos leídos antes de enviarlos al computador autorizado." },
+      { property: "og:title", content: "Verificar datos extraídos — Digitalizador" },
+      { property: "og:description", content: "Validación humana antes de automatizar el formulario." },
+    ],
+  }),
+  component: Verificar,
+});
+
+function Verificar() {
+  const { id } = Route.useParams();
+  const router = useRouter();
+  const { data: sesion } = useSesion();
+  const [valores, setValores] = useState<Record<string, string>>({});
+  const [computerId, setComputerId] = useState<string>("");
+  const [guardando, setGuardando] = useState(false);
+
+  const { data: doc, refetch } = useQuery({
+    queryKey: ["documento", id],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("documents").select("*").eq("id", id).single();
+      if (error) throw error;
+      return data;
+    },
+    refetchInterval: (query) =>
+      ["confirmado", "enviado_pc"].includes((query.state.data?.status as string) ?? "") ? 4000 : false,
+  });
+
+  const { data: computadores } = useQuery({
+    queryKey: ["computadores-activos"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("computers")
+        .select("id, nombre, codigo, activo, last_seen_at")
+        .eq("activo", true)
+        .order("nombre");
+      return data ?? [];
+    },
+  });
+
+  useEffect(() => {
+    if (!doc) return;
+    const iniciales: Record<string, string> = {};
+    for (const campo of CAMPOS) iniciales[campo.key] = (doc[campo.key] as string | null) ?? "";
+    setValores(iniciales);
+    if (doc.computer_id) setComputerId(doc.computer_id);
+  }, [doc]);
+
+  useEffect(() => {
+    if (!computerId && computadores && computadores.length > 0) setComputerId(computadores[0]!.id);
+  }, [computadores, computerId]);
+
+  const confianza = (doc?.confianza ?? {}) as Record<string, number>;
+  const revisar = CAMPOS.filter((c) => (confianza[c.key] ?? 0) < 0.85 || !valores[c.key]);
+  const meta = doc ? STATUS_META[doc.status as DocStatus] : null;
+  const bloqueado = !!doc && ["confirmado", "enviado_pc", "formulario_completado", "registrado"].includes(doc.status);
+
+  async function confirmar() {
+    if (!doc || !sesion) return;
+    const faltantes = CAMPOS.filter((c) => !valores[c.key]?.trim()).map((c) => c.label);
+    if (faltantes.length > 0) {
+      toast.error(`Complete los campos: ${faltantes.join(", ")}`);
+      return;
+    }
+    if (!computerId) {
+      toast.error("Seleccione el computador autorizado de destino");
+      return;
+    }
+    setGuardando(true);
+    try {
+      const { error } = await supabase
+        .from("documents")
+        .update({
+          ...valores,
+          computer_id: computerId,
+          status: "confirmado",
+          sent_at: new Date().toISOString(),
+          error_message: null,
+        })
+        .eq("id", doc.id);
+      if (error) throw error;
+      await supabase.from("operation_logs").insert({
+        document_id: doc.id,
+        operator_id: sesion.userId,
+        evento: "Datos confirmados y enviados al PC",
+      });
+      toast.success("Datos enviados. Esperando al agente de escritorio…");
+      await refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo enviar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  async function cancelar() {
+    if (!doc || !sesion) return;
+    await supabase.from("documents").update({ status: "cancelado" }).eq("id", doc.id);
+    await supabase.from("operation_logs").insert({
+      document_id: doc.id,
+      operator_id: sesion.userId,
+      evento: "Documento cancelado",
+    });
+    router.navigate({ to: "/inicio" });
+  }
+
+  if (!doc) {
+    return (
+      <AppShell titulo="Verificación" esAdmin={sesion?.esAdmin}>
+        <div className="panel flex items-center gap-3 p-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Cargando documento…
+        </div>
+      </AppShell>
+    );
+  }
+
+  return (
+    <AppShell
+      titulo="Verificación de datos"
+      subtitulo={`Documento ${doc.numero_documento || "sin número"}`}
+      esAdmin={sesion?.esAdmin}
+      accion={
+        meta ? (
+          <span className={`rounded-md px-2 py-1 text-[11px] font-medium ${TONE_CLASS[meta.tone]}`}>{meta.label}</span>
+        ) : null
+      }
+    >
+      {bloqueado ? (
+        <div className="panel mb-4 p-5">
+          <p className="label-caps">Estado del envío</p>
+          <h2 className="mt-1 text-lg font-semibold">
+            {doc.status === "registrado"
+              ? "Registrado en el sistema empresarial"
+              : doc.status === "formulario_completado"
+                ? "Formulario completado — revise antes de guardar"
+                : "Datos enviados, esperando procesamiento…"}
+          </h2>
+          <p className="mt-1.5 text-sm text-muted-foreground">
+            {doc.status === "formulario_completado"
+              ? "El agente dejó el formulario listo en Firefox. El guardado final lo realiza el operador en el computador."
+              : "El agente de escritorio recibirá los datos y completará el formulario en Firefox."}
+          </p>
+          {doc.error_message ? (
+            <p className="mt-3 flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {doc.error_message}
+            </p>
+          ) : null}
+        </div>
+      ) : revisar.length > 0 ? (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warning/40 bg-warning/15 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning-foreground" />
+          <p className="text-sm text-warning-foreground">
+            <strong className="font-semibold">Datos que requieren revisión:</strong>{" "}
+            {revisar.map((c) => c.label).join(", ")}
+          </p>
+        </div>
+      ) : null}
+
+      <section className="panel divide-y divide-border">
+        {CAMPOS.map((campo) => {
+          const tono = confianzaTone(confianza[campo.key]);
+          return (
+            <div key={campo.key} className="px-4 py-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="label-caps">{campo.label}</span>
+                <span
+                  className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${TONE_CLASS[tono]}`}
+                >
+                  {tono === "ok" ? <Check className="h-3 w-3" /> : <AlertTriangle className="h-3 w-3" />}
+                  {Math.round((confianza[campo.key] ?? 0) * 100)}%
+                </span>
+              </div>
+              {campo.type === "select" ? (
+                <select
+                  disabled={bloqueado}
+                  value={valores[campo.key] ?? ""}
+                  onChange={(e) => setValores((v) => ({ ...v, [campo.key]: e.target.value }))}
+                  className="mt-1.5 w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary disabled:opacity-70"
+                >
+                  <option value="">Seleccione…</option>
+                  {campo.options.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  disabled={bloqueado}
+                  value={valores[campo.key] ?? ""}
+                  maxLength={120}
+                  onChange={(e) => setValores((v) => ({ ...v, [campo.key]: e.target.value }))}
+                  className="mt-1.5 w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/25 disabled:opacity-70"
+                />
+              )}
+            </div>
+          );
+        })}
+      </section>
+
+      {!bloqueado ? (
+        <>
+          <div className="panel mt-4 p-4">
+            <span className="label-caps flex items-center gap-1.5">
+              <Monitor className="h-3.5 w-3.5" /> Computador autorizado
+            </span>
+            <select
+              value={computerId}
+              onChange={(e) => setComputerId(e.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            >
+              {(computadores ?? []).length === 0 ? <option value="">No hay computadores activos</option> : null}
+              {(computadores ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre} · {c.codigo}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-4 space-y-2.5">
+            <button
+              onClick={() => void confirmar()}
+              disabled={guardando}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Confirmar datos y enviar al PC
+            </button>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => router.navigate({ to: "/escanear" })}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium"
+              >
+                <RotateCcw className="h-4 w-4" /> Volver a escanear
+              </button>
+              <button
+                onClick={() => void cancelar()}
+                className="flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3 text-sm font-medium text-destructive"
+              >
+                <X className="h-4 w-4" /> Cancelar
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <button
+          onClick={() => router.navigate({ to: "/inicio" })}
+          className="mt-4 w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium"
+        >
+          Volver al inicio
+        </button>
+      )}
+    </AppShell>
+  );
+}
