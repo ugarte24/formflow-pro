@@ -1,4 +1,4 @@
-import { createStart, createCsrfMiddleware, createMiddleware } from "@tanstack/react-start";
+import { createStart, createMiddleware } from "@tanstack/react-start";
 
 import { renderErrorPage } from "./lib/error-page";
 import { attachSupabaseAuth } from "@/integrations/supabase/auth-attacher";
@@ -18,11 +18,38 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
   }
 });
 
-// Start installs this automatically when src/start.ts is absent; defining the
-// file opts out, so re-add it explicitly to keep server functions protected
-// from cross-site requests.
-const csrfMiddleware = createCsrfMiddleware({
-  filter: (ctx) => ctx.handlerType === "serverFn",
+/**
+ * CSRF para server functions.
+ * No usamos createCsrfMiddleware de TanStack: en el bundle Nitro/Vercel
+ * el export isomórfico llega como undefined ("createCsrfMiddleware is not a function").
+ */
+const csrfMiddleware = createMiddleware().server(async (ctx) => {
+  const { next, request } = ctx;
+  const handlerType = (ctx as { handlerType?: string }).handlerType;
+  if (handlerType && handlerType !== "serverFn") {
+    return next();
+  }
+
+  const fetchSite = request.headers.get("Sec-Fetch-Site");
+  if (fetchSite !== null && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return new Response(JSON.stringify({ error: "CSRF blocked" }), {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  const origin = request.headers.get("Origin");
+  if (origin !== null) {
+    const expected = new URL(request.url).origin;
+    if (origin !== expected) {
+      return new Response(JSON.stringify({ error: "CSRF blocked" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    }
+  }
+
+  return next();
 });
 
 export const startInstance = createStart(() => ({

@@ -42,45 +42,62 @@ Reglas:
 - Si un dato no aparece físicamente en el documento, devuelve valor null y confianza 0.
 - La confianza refleja la legibilidad real de ese campo en la imagen.`;
 
+function geminiApiKey() {
+  return process.env["GEMINI_API_KEY"] || process.env["GOOGLE_GENERATIVE_AI_API_KEY"] || "";
+}
+
 export const extraerDatosDocumento = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => Input.parse(input))
   .handler(async ({ data }) => {
-    const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("Falta la configuración de IA");
+    const key = geminiApiKey();
+    if (!key) {
+      throw new Error("Falta GEMINI_API_KEY en las variables de entorno del servidor (Vercel/Supabase).");
+    }
 
     const inicio = Date.now();
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const model = process.env["GEMINI_MODEL"] || "gemini-flash-latest";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;
+
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "google/gemini-3.6-flash",
-        messages: [
-          { role: "system", content: SYSTEM },
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents: [
           {
             role: "user",
-            content: [
-              { type: "text", text: "Extrae los campos del documento de identidad de esta imagen." },
+            parts: [
+              { text: "Extrae los campos del documento de identidad de esta imagen." },
               {
-                type: "image_url",
-                image_url: { url: `data:${data.mimeType};base64,${data.imageBase64}` },
+                inlineData: {
+                  mimeType: data.mimeType,
+                  data: data.imageBase64,
+                },
               },
             ],
           },
         ],
+        generationConfig: {
+          temperature: 0.1,
+          responseMimeType: "application/json",
+        },
       }),
     });
 
-    if (res.status === 429) throw new Error("Demasiadas solicitudes de lectura. Intente nuevamente en unos segundos.");
-    if (res.status === 402) throw new Error("Se agotaron los créditos de IA del proyecto.");
+    if (res.status === 429) {
+      throw new Error("Demasiadas solicitudes de lectura. Intente nuevamente en unos segundos.");
+    }
     if (!res.ok) {
       const detalle = await res.text();
-      console.error("gateway error", res.status, detalle);
+      console.error("gemini error", res.status, detalle);
       throw new Error("El servicio de lectura no está disponible en este momento.");
     }
 
-    const json = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const raw = json.choices?.[0]?.message?.content ?? "";
+    const json = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const raw = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
     const limpio = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
 
     let parsed;
