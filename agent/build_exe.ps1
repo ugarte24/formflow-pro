@@ -34,6 +34,7 @@ if (-not (Test-Path (Join-Path $out "DigitalizadorAgent.exe"))) {
 # Asegurar .env.example junto al exe (por si el datas no lo copió)
 Copy-Item -Force ".env.example" (Join-Path $out ".env.example") -ErrorAction SilentlyContinue
 Copy-Item -Force "selectors.json" (Join-Path $out "selectors.json") -ErrorAction SilentlyContinue
+Copy-Item -Force "DigitalizadorAgent.ico" (Join-Path $out "DigitalizadorAgent.ico") -ErrorAction SilentlyContinue
 
 # Script de ayuda para el operador
 @"

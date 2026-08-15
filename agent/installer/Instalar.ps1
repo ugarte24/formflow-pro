@@ -84,20 +84,26 @@ try {
 
   $desktop = [Environment]::GetFolderPath("Desktop")
   $wsh = New-Object -ComObject WScript.Shell
+  $exeDest = Join-Path $Destino "DigitalizadorAgent.exe"
+  $icoDest = Join-Path $Destino "DigitalizadorAgent.ico"
+  $iconLoc = if (Test-Path $icoDest) { "$icoDest,0" } else { "$exeDest,0" }
+
   $lnkDesk = Join-Path $desktop "Digitalizador Agent.lnk"
   $s = $wsh.CreateShortcut($lnkDesk)
-  $s.TargetPath = $bat
+  $s.TargetPath = $exeDest
   $s.WorkingDirectory = $Destino
   $s.Description = "Agente Digitalizador - RUAT"
+  $s.IconLocation = $iconLoc
   $s.Save()
 
   $startDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Digitalizador"
   New-Item -ItemType Directory -Force -Path $startDir | Out-Null
   $lnkStart = Join-Path $startDir "Digitalizador Agent.lnk"
   $s2 = $wsh.CreateShortcut($lnkStart)
-  $s2.TargetPath = $bat
+  $s2.TargetPath = $exeDest
   $s2.WorkingDirectory = $Destino
   $s2.Description = "Agente Digitalizador - RUAT"
+  $s2.IconLocation = $iconLoc
   $s2.Save()
 
   Copy-Item -Force (Join-Path $Origen "Desinstalar.ps1") (Join-Path $Destino "Desinstalar.ps1") -ErrorAction SilentlyContinue

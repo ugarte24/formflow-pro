@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,14 @@ SELECTORS_PATH = Path(__file__).with_name("selectors.json")
 
 class ContribuyenteYaRegistrado(Exception):
     """CI ya existe en el mismo municipio (ej. RIBERALTA): no continuar el alta."""
+
+    def __init__(self, mensaje: str) -> None:
+        super().__init__(mensaje)
+        self.mensaje = mensaje
+
+
+class DatosOcrInvalidos(Exception):
+    """Género, estado civil o fecha vacíos/raros: avisar al operador."""
 
     def __init__(self, mensaje: str) -> None:
         super().__init__(mensaje)
@@ -70,7 +79,9 @@ class RuatAutomator:
             self._connect_persistent()
 
         assert self.page is not None
-        # Diálogos nativos del navegador (confirm): siempre Cancelar si preguntan por Apoderado
+        # Diálogos nativos: Cancelar si preguntan por Apoderado (también en pestañas nuevas)
+        if self._context is not None:
+            self._context.on("page", lambda p: p.on("dialog", self._on_browser_dialog))
         self.page.on("dialog", self._on_browser_dialog)
         if self.ruat_url and self.ruat_url not in (self.page.url or ""):
             log.info("Navegando a RUAT_START_URL…")
@@ -137,18 +148,78 @@ class RuatAutomator:
             "para conservar sesión e IP autorizada."
         )
 
+    def _page_text(self, page: Page) -> str:
+        """Texto visible incluyendo iframes (misma ventana; RUAT a veces usa frames)."""
+        parts: list[str] = []
+        try:
+            parts.append(page.locator("body").inner_text(timeout=600) or "")
+        except Exception:
+            pass
+        try:
+            for fr in page.frames:
+                if fr == page.main_frame:
+                    continue
+                try:
+                    parts.append(fr.locator("body").inner_text(timeout=400) or "")
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return " ".join(parts)[:8000].lower()
+
+    def _page_score(self, page: Page) -> int:
+        """Puntúa si la pestaña tiene UI RUAT útil (misma ventana, distinto layout)."""
+        try:
+            if page.is_closed():
+                return -1
+            url = (page.url or "").strip().lower()
+            if not url or url.startswith("about:"):
+                return 0
+            score = 1
+            if "ruat" in url or "municipios" in url or "contribuyentes" in url:
+                score += 15
+            if "armadosubmenu" in url or "submenu" in url:
+                score += 55
+            if "menuprincipal" in url:
+                score += 25
+            if "contribuyente" in url or "buscar" in url or "tramite" in url:
+                score += 35
+            texto = self._page_text(page)
+            if len(texto.strip()) < 30:
+                score -= 25
+            if "contribuyente" in texto:
+                score += 40
+            if "número documento" in texto or "numero documento" in texto:
+                score += 55
+            if "buscar contribuyente" in texto:
+                score += 50
+            if "registro contribuyente natural" in texto:
+                score += 60
+            if "modificación contribuyente" in texto or "modificacion contribuyente" in texto:
+                score += 25
+            return score
+        except Exception:
+            return -1
+
     def _pick_page(self, context: BrowserContext) -> Page:
-        pages = context.pages
-        if self.ruat_url:
-            host = re.sub(r"^https?://", "", self.ruat_url).split("/")[0].lower()
-            for p in pages:
-                if host and host in (p.url or "").lower():
-                    p.bring_to_front()
-                    return p
-        if pages:
-            pages[0].bring_to_front()
-            return pages[0]
-        return context.new_page()
+        """Elige la pestaña RUAT del contexto (normalmente hay una sola)."""
+        pages = [p for p in context.pages if not p.is_closed()]
+        if not pages:
+            return context.new_page()
+        if self.page and not self.page.is_closed() and self.page in pages:
+            if self._page_score(self.page) >= 15:
+                return self.page
+        scored = sorted(
+            ((self._page_score(p), i, p) for i, p in enumerate(pages)),
+            key=lambda t: (t[0], t[1]),
+            reverse=True,
+        )
+        best = scored[0][2]
+        try:
+            best.bring_to_front()
+        except Exception:
+            pass
+        return best
 
     def close(self) -> None:
         try:
@@ -173,17 +244,46 @@ class RuatAutomator:
         try:
             if not self.page:
                 return False
+            if self.page.is_closed():
+                return False
             _ = self.page.url
             return True
         except Exception:
             return False
 
+    def _page_activa(self) -> Page:
+        """Misma ventana Nightly: reutilizar self.page; solo recuperar si murió."""
+        if self._pagina_viva():
+            assert self.page is not None
+            return self.page
+        if self._context:
+            try:
+                self.page = self._pick_page(self._context)
+                if self.page and not self.page.is_closed():
+                    return self.page
+            except Exception:
+                pass
+        self.ensure_connected()
+        assert self.page is not None
+        return self.page
+
     def ensure_connected(self) -> None:
-        """Reabre Firefox si el operador cerro Nightly o se cayo el contexto."""
+        """Reabre Nightly solo si se cerró; no busca otras ventanas."""
         if self.dry_run:
             return
-        if self._pagina_viva():
+        if self._pagina_viva() and self._context is not None:
             return
+        if self._context is not None:
+            try:
+                self.page = self._pick_page(self._context)
+                if self.page and not self.page.is_closed():
+                    log.info("Recuperé la pestaña Nightly · url=%s", self.page.url)
+                    self.page.on("dialog", self._on_browser_dialog)
+                    if self.ruat_url and self._page_score(self.page) < 15:
+                        self.page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
+                    return
+            except Exception as exc:
+                log.warning("No pude recuperar pestaña (%s) — reinicio Nightly", exc)
         log.warning("Firefox/Nightly no responde — reconectando…")
         try:
             self.close()
@@ -191,10 +291,207 @@ class RuatAutomator:
             pass
         self.connect()
 
+    def _esperar_ui(self, predicado, timeout_ms: int = 12000, desc: str = "UI") -> Page:
+        """Espera a que cambie el diseño en la MISMA ventana (sin popups)."""
+        page = self._page_activa()
+        deadline = time.time() + timeout_ms / 1000.0
+        while time.time() < deadline:
+            page = self._page_activa()
+            try:
+                if predicado(page):
+                    log.info("UI lista: %s · %s", desc, (page.url or "")[:100])
+                    return page
+            except Exception:
+                pass
+            page.wait_for_timeout(250)
+        return self._page_activa()
+
+    def _ir_menu_principal(self) -> Page:
+        page = self._page_activa()
+        if not self.ruat_url:
+            return page
+        url = (page.url or "").lower()
+        texto = self._page_text(page)
+        if (
+            "menuprincipal" in url
+            or "armadosubmenu" in url
+            or "submenu" in url
+            or "registro contribuyente natural" in texto
+            or self._ya_en_buscar_contribuyente(page)
+            or self._page_score(page) >= 40
+        ):
+            return page
+        log.info("Navegando al menú principal RUAT (misma ventana)…")
+        try:
+            page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as exc:
+            log.warning("goto menu falló (%s) — reconecto", exc)
+            self.ensure_connected()
+            page = self._page_activa()
+            page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
+        page.wait_for_timeout(400)
+        return self._page_activa()
+
+    def _ya_en_submenu_contribuyente_natural(self, page: Page) -> bool:
+        url = (page.url or "").lower()
+        if "armadosubmenu" in url or "submenu" in url:
+            return True
+        texto = self._page_text(page)
+        return "registro contribuyente natural" in texto and (
+            "baja de contribuyente" in texto or "modificación contribuyente" in texto or "modificacion contribuyente" in texto
+        )
+
+    def _ya_en_buscar_contribuyente(self, page: Page) -> bool:
+        """Formulario Buscar (layout tras clic en Registro…), no el link del submenú."""
+        try:
+            for scope in self._scopes(page):
+                try:
+                    if scope.get_by_text(re.compile(r"BUSCAR\s+CONTRIBUYENTE", re.I)).count():
+                        return True
+                    if scope.get_by_label(re.compile(r"N[uú]mero\s+Documento", re.I)).count():
+                        return True
+                except Exception:
+                    continue
+            texto = self._page_text(page)
+            if "buscar contribuyente" in texto and (
+                "número documento" in texto or "numero documento" in texto or "criterios" in texto
+            ):
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _scopes(self, page: Page):
+        yield page
+        try:
+            for fr in page.frames:
+                yield fr
+        except Exception:
+            return
+
+    def _click_por_nombre(self, page: Page, name_pattern: str) -> bool:
+        """Clic en la misma ventana (página + iframes)."""
+        pat = re.compile(str(name_pattern), re.I)
+        for scope in self._scopes(page):
+            for role in ("link", "button", "menuitem"):
+                try:
+                    loc = scope.get_by_role(role, name=pat)
+                    if loc.count():
+                        loc.first.click(timeout=12000, force=True)
+                        return True
+                except Exception:
+                    continue
+            try:
+                loc = scope.locator("a").filter(has_text=pat)
+                if loc.count():
+                    loc.first.click(timeout=12000, force=True)
+                    return True
+            except Exception:
+                pass
+            try:
+                loc = scope.locator("td, span, div, li").filter(has_text=pat)
+                n = min(loc.count(), 8)
+                for i in range(n):
+                    try:
+                        el = loc.nth(i)
+                        txt = (el.inner_text(timeout=500) or "").strip()
+                        if len(txt) > 80:
+                            continue
+                        if pat.search(txt):
+                            el.click(timeout=12000, force=True)
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        return False
+
+    def _click_menu(self, name_pattern: str, esperar=None, timeout_ms: int = 12000) -> Page:
+        """Clic y espera el nuevo layout en la misma ventana."""
+        last_err: Exception | None = None
+        for attempt in range(3):
+            page = self._page_activa()
+            try:
+                if not self._click_por_nombre(page, name_pattern):
+                    log.warning("No se encontró «%s» en la ventana actual", name_pattern)
+                    return page
+                page.wait_for_timeout(500)
+                if esperar:
+                    return self._esperar_ui(esperar, timeout_ms=timeout_ms, desc=name_pattern)
+                page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+                page.wait_for_timeout(400)
+                return self._page_activa()
+            except Exception as exc:
+                last_err = exc
+                msg = str(exc).lower()
+                if "closed" in msg or "target page" in msg:
+                    log.warning("Página cerrada al clic «%s» (intento %s)", name_pattern, attempt + 1)
+                    self.ensure_connected()
+                    continue
+                raise
+        if last_err:
+            raise last_err
+        return self._page_activa()
+
+    def _ir_contribuyente_natural(self, page: Page) -> Page:
+        page = self._page_activa()
+        if self._ya_en_submenu_contribuyente_natural(page) or self._ya_en_buscar_contribuyente(page):
+            log.info("Ya en submenú/Buscar — mismo layout, no reabro menú")
+            return page
+        return self._click_menu(
+            r"^Contribuyente Natural$",
+            esperar=lambda p: self._ya_en_submenu_contribuyente_natural(p) or self._ya_en_buscar_contribuyente(p),
+            timeout_ms=12000,
+        )
+
+    def _ir_registro_contribuyente_natural(self, page: Page) -> Page:
+        page = self._page_activa()
+        if self._ya_en_buscar_contribuyente(page):
+            log.info("Ya en Buscar Contribuyente — sigo con CI")
+            return page
+        if not self._ya_en_submenu_contribuyente_natural(page):
+            page = self._ir_contribuyente_natural(page)
+            if self._ya_en_buscar_contribuyente(page):
+                return page
+
+        patterns = self._sel("registro_contribuyente_natural", "link_names", default=None)
+        if isinstance(patterns, list) and patterns:
+            candidatos = [str(p) for p in patterns]
+        else:
+            primary = self._sel(
+                "registro_contribuyente_natural",
+                "link_name",
+                default=r"^Registro\s+(de\s+)?Contribuyente\s+Natural$",
+            )
+            candidatos = [
+                str(primary),
+                r"^Registro\s+Contribuyente\s+Natural$",
+                r"^Registro\s+de\s+Contribuyente\s+Natural$",
+                r"Registro\s+Contribuyente\s+Natural",
+            ]
+
+        for pat in candidatos:
+            page = self._page_activa()
+            if self._ya_en_buscar_contribuyente(page):
+                return page
+            if not self._click_por_nombre(page, pat):
+                continue
+            log.info("Clic «%s» — espero formulario Buscar en la misma ventana", pat)
+            page = self._esperar_ui(self._ya_en_buscar_contribuyente, timeout_ms=15000, desc="Buscar Contribuyente")
+            if self._ya_en_buscar_contribuyente(page):
+                return page
+
+        page = self._page_activa()
+        if self._ya_en_buscar_contribuyente(page):
+            return page
+        raise RuntimeError(
+            "No pude abrir «Registro Contribuyente Natural» en esta ventana. "
+            "Deje visible el submenú CONTRIBUYENTE NATURAL y vuelva a enviar."
+        )
+
     def procesar(self, doc: dict) -> None:
         self.ensure_connected()
-        assert self.page is not None
-        page = self.page
+        page = self._page_activa()
 
         if self.dry_run:
             log.info(
@@ -205,10 +502,22 @@ class RuatAutomator:
             )
             return
 
-        self._ir_contribuyente_natural(page)
-        self._ir_registro_contribuyente_natural(page)
+        # Misma ventana: solo cambia el diseño (menú → submenú → Buscar → …)
+        if self._ya_en_buscar_contribuyente(page):
+            log.info("Buscar ya abierto — sigo con CI")
+        elif self._ya_en_submenu_contribuyente_natural(page):
+            log.info("Submenú ya abierto — abro Registro…")
+            page = self._ir_registro_contribuyente_natural(page)
+        else:
+            page = self._ir_menu_principal()
+            if not self._ya_en_buscar_contribuyente(page):
+                page = self._ir_contribuyente_natural(page)
+            if not self._ya_en_buscar_contribuyente(page):
+                page = self._ir_registro_contribuyente_natural(page)
+
         self._buscar_contribuyente(page, doc)
 
+        page = self._page_activa()
         rama = self._clasificar_resultado_busqueda(page)
         if rama == "ya_en_municipio":
             nombre = self._nombre_en_resultado(page) or (
@@ -220,19 +529,28 @@ class RuatAutomator:
                 f"El contribuyente ya tiene un registro en Riberalta ({detalle}). "
                 "No se inició un nuevo alta. Use Modificación si corresponde."
             )
-        if rama == "asociar":
-            log.info("Coincidencia en otro municipio → Asociar (sin marcar foto)")
-            self._click_asociar_mejor_nombre(page, doc)
-        else:
-            log.info("Sin registro usable → Nuevo Contribuyente / alta nueva")
-            self._click_nuevo_contribuyente(page)
 
+        # Otros municipios o sin resultados → siempre Nuevo Contribuyente (ya no Asociar)
+        self._validar_datos_ocr(doc)
+        if rama == "asociar":
+            log.info("Otros municipios en Resultados → Nuevo Contribuyente (sin Asociar)")
+        else:
+            log.info("Sin registro usable → Nuevo Contribuyente")
+        self._click_nuevo_contribuyente(page)
+
+        page = self._page_activa()
         self._recepcionar_documentacion(page)
+        page = self._page_activa()
         self._datos_generales(page, doc)
+        page = self._page_activa()
         self._domicilio_legal(page, doc)
+        page = self._page_activa()
         self._cancelar_apoderado(page)
+        page = self._page_activa()
         self._info_adicional(page, doc)
+        page = self._page_activa()
         self._subir_fotografia(page, doc)
+        page = self._page_activa()
         self._confirmar_tramite_imprimir(page)
         log.info("Flujo RUAT completado (modo seguro — NO se pulsó Grabar)")
 
@@ -246,32 +564,8 @@ class RuatAutomator:
             node = node[k]
         return node
 
-    def _ir_contribuyente_natural(self, page: Page) -> None:
-        name = self._sel("contribuyente_natural", "link_name", default="Contribuyente Natural")
-        link = page.get_by_role("link", name=re.compile(str(name), re.I))
-        if link.count():
-            link.first.click()
-            page.wait_for_timeout(700)
-        else:
-            log.warning("No se encontró '%s' — asuma que ya está en el submenú", name)
-
-    def _ir_registro_contribuyente_natural(self, page: Page) -> None:
-        name = self._sel(
-            "registro_contribuyente_natural",
-            "link_name",
-            default="^Registro Contribuyente Natural$",
-        )
-        link = page.get_by_role("link", name=re.compile(str(name), re.I))
-        if link.count():
-            link.first.click()
-            page.wait_for_timeout(900)
-        else:
-            log.warning(
-                "No se encontró '%s' — asuma que ya está en Buscar Contribuyente",
-                name,
-            )
-
     def _buscar_contribuyente(self, page: Page, doc: dict) -> None:
+        page = self._esperar_ui(self._ya_en_buscar_contribuyente, timeout_ms=12000, desc="formulario Buscar")
         numero = (doc.get("numero_documento") or "").split("-")[0].strip()
         if not numero:
             raise RuntimeError("numero_documento vacío")
@@ -289,7 +583,15 @@ class RuatAutomator:
         if not filled:
             css = self._sel("buscar", "input_documento", default="input[type='text']")
             idx = int(self._sel("buscar", "input_documento_index", default=0) or 0)
-            page.locator(str(css)).nth(idx).fill(numero)
+            campo = page.locator(str(css)).nth(idx)
+            try:
+                campo.wait_for(state="visible", timeout=15000)
+            except Exception as exc:
+                raise RuntimeError(
+                    "No encontré el formulario Buscar Contribuyente en esta ventana. "
+                    "Abra Registro Contribuyente Natural y vuelva a enviar."
+                ) from exc
+            campo.fill(numero)
 
         # Tipo Documento = CEDULA DE IDENTIDAD (suele venir ya seleccionado)
         tipo_label = self._sel("buscar", "tipo_documento_label", default="CEDULA DE IDENTIDAD")
@@ -320,12 +622,52 @@ class RuatAutomator:
         page.get_by_role("button", name=re.compile(str(btn), re.I)).click()
         page.wait_for_timeout(1000)
 
+    def _validar_datos_ocr(self, doc: dict) -> None:
+        """Género, estado civil y fecha: si faltan o son raros → avisar al operador."""
+        problemas: list[str] = []
+
+        genero = (doc.get("genero") or "").strip()
+        if not genero:
+            problemas.append("género vacío")
+        elif not re.search(r"MASCULINO|FEMENINO|MASC|FEM|HOMBRE|MUJER|\bM\b|\bF\b", genero, re.I):
+            problemas.append(f"género raro («{genero}»)")
+
+        ec = (doc.get("estado_civil") or "").strip().upper()
+        if not ec:
+            problemas.append("estado civil vacío")
+        else:
+            ec_ok = re.search(
+                r"SOLTERO|CASADO|DIVORCIADO|VIUDO|UNION|CONVIV|SEPARADO",
+                ec,
+                re.I,
+            )
+            if not ec_ok:
+                problemas.append(f"estado civil raro («{doc.get('estado_civil')}»)")
+
+        fecha_raw = (doc.get("fecha_nacimiento") or "").strip()
+        fecha = self._normalizar_fecha_dd_mm_aaaa(fecha_raw)
+        if not fecha_raw:
+            problemas.append("fecha de nacimiento vacía")
+        elif not re.match(r"^\d{2}/\d{2}/\d{4}$", fecha):
+            problemas.append(f"fecha de nacimiento rara («{fecha_raw}»)")
+        else:
+            d, m, y = (int(x) for x in fecha.split("/"))
+            if not (1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2100):
+                problemas.append(f"fecha de nacimiento inválida («{fecha}»)")
+
+        if problemas:
+            raise DatosOcrInvalidos(
+                "Datos del CI incompletos o raros: "
+                + "; ".join(problemas)
+                + ". Corrija en Verificar y vuelva a enviar al PC."
+            )
+
     def _clasificar_resultado_busqueda(self, page: Page) -> str:
         """
         Tras Buscar:
         - ya_en_municipio: Resultados con Gobierno Municipal = RIBERALTA
-        - asociar: link Asociar (otro municipio)
-        - nuevo: Nuevo Contribuyente / sin fila local
+        - asociar: había link Asociar (otro municipio) — ahora se trata como alta nueva
+        - nuevo: sin fila local / Nuevo Contribuyente
         """
         mun = str(self._sel("buscar", "municipio_local", default="RIBERALTA"))
         page.wait_for_timeout(400)
@@ -812,12 +1154,14 @@ class RuatAutomator:
             raise RuntimeError("No se encontró botón Aceptar en Información Adicional")
 
     def _subir_fotografia(self, page: Page, doc: dict) -> None:
-        """Solo sección Fotografía (≤90 KB). No anverso ni reverso."""
+        """Solo sección Fotografía (≤90 KB). Sin foto_url → continúa sin foto."""
         img = self.selectors.get("imagenes") or {}
         foto_cfg = img.get("fotografia") or {}
         url = doc.get("foto_url")
         if not url:
-            raise RuntimeError("El documento no trae foto_url — capture la foto en la app")
+            log.warning("Sin foto_url — continúo sin fotografía")
+            self._aceptar_registrar_imagenes(page, img)
+            return
         dest = self.download_dir / f"{doc['id']}-foto.jpg"
         r = requests.get(url, timeout=60)
         r.raise_for_status()
@@ -850,13 +1194,14 @@ class RuatAutomator:
         log.info("Fotografía del escaneo inyectada (sin diálogo Windows): %s", dest.name)
 
         self._editar_fotografia_procesar(page)
+        self._aceptar_registrar_imagenes(page, img)
 
-        # Volver a REGISTRAR IMAGENES: bajar y Aceptar (no anverso/reverso)
+    def _aceptar_registrar_imagenes(self, page: Page, img: dict | None = None) -> None:
+        img = img or (self.selectors.get("imagenes") or {})
         page.wait_for_timeout(500)
         aceptar = img.get("boton_aceptar", "^Aceptar$")
         btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
         if btn.count() == 0:
-            # A veces el botón está fuera de vista / al final del form
             page.keyboard.press("End")
             page.wait_for_timeout(300)
             btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
@@ -866,7 +1211,8 @@ class RuatAutomator:
             page.wait_for_timeout(1000)
             log.info("Registrar Imágenes → Aceptar")
         else:
-            raise RuntimeError("No se encontró botón Aceptar al final de Registrar Imágenes")
+            # Si no hay pantalla de imágenes (flujo corto), no bloquear
+            log.warning("No se encontró Aceptar en Registrar Imágenes — continúo")
 
     def _confirmar_tramite_imprimir(self, page: Page) -> None:
         """

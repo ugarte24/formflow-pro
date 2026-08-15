@@ -13,6 +13,7 @@ a = Analysis(
         ('.env.example', '.'),
         ('CALIBRACION.md', '.'),
         ('README.md', '.'),
+        ('DigitalizadorAgent.ico', '.'),
     ],
     hiddenimports=[
         'api_client',
@@ -51,6 +52,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='DigitalizadorAgent.ico',
 )
 
 coll = COLLECT(

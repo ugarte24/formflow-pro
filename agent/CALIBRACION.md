@@ -92,10 +92,10 @@ Ejemplo: CI `179208` → filas MONTERO / QUILLACOLLO / COCHABAMBA (ninguna RIBER
 
 | Regla | Acción |
 |---|---|
-| Checkbox **Imagen** / Fotografía | **No marcar** |
-| Fila a usar | La de **Nombre Completo** más parecido al del CI |
-| Acción | Clic **Asociar** |
-| Después | Continuar el flujo y completar solo lo que falte (docs, datos, domicilio, celular, foto, etc.) |
+| Checkbox **Imagen** / Fotografía | No usar |
+| Links **Asociar** | **No usar** |
+| Acción | Clic **Nuevo Contribuyente** |
+| Después | Continuar Recepcionar → Datos → Domicilio → … (igual que alta sin resultados) |
 
 Si no hay filas foráneas → **Nuevo Contribuyente**.
 

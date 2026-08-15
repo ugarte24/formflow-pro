@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Download, Loader2, ShieldCheck, UserPlus, Users } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Download, Loader2, Pencil, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -16,9 +16,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
 import {
   crearUsuarioApp,
+  editarUsuarioApp,
   estadoInstaladorAgente,
+  listarUsuariosApp,
   urlDescargaInstaladorAgente,
   type RolUsuario,
+  type UsuarioAdmin,
 } from "@/lib/admin.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
@@ -46,8 +49,9 @@ function Admin() {
   const { data: sesion } = useSesion();
   const queryClient = useQueryClient();
   const [descargando, setDescargando] = useState(false);
-  const [creandoUsuario, setCreandoUsuario] = useState(false);
+  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
   const [modalUsuario, setModalUsuario] = useState(false);
+  const [editandoId, setEditandoId] = useState<string | null>(null);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevoEmail, setNuevoEmail] = useState("");
   const [nuevoPassword, setNuevoPassword] = useState("");
@@ -56,20 +60,8 @@ function Admin() {
 
   const { data: operadores } = useQuery({
     queryKey: ["operadores"],
-    queryFn: async () => {
-      const [{ data: perfiles }, { data: roles }] = await Promise.all([
-        supabase
-          .from("profiles")
-          .select("id, nombre_completo, telefono, activo, created_at")
-          .order("created_at"),
-        supabase.from("user_roles").select("user_id, role"),
-      ]);
-      return (perfiles ?? []).map((p) => ({
-        ...p,
-        activo: p.activo !== false,
-        esAdmin: (roles ?? []).some((r) => r.user_id === p.id && r.role === "admin"),
-      }));
-    },
+    queryFn: () => listarUsuariosApp(),
+    enabled: !!sesion?.esAdmin,
   });
 
   const { data: instalador, isLoading: cargandoInstalador } = useQuery({
@@ -87,24 +79,8 @@ function Admin() {
     }
   }
 
-  async function alternarAdmin(userId: string, esAdmin: boolean): Promise<void> {
-    if (esAdmin) {
-      const { error } = await supabase.from("user_roles").delete().eq("user_id", userId).eq("role", "admin");
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-    } else {
-      const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" });
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-    }
-    queryClient.invalidateQueries({ queryKey: ["operadores"] });
-  }
-
   function resetFormUsuario() {
+    setEditandoId(null);
     setNuevoNombre("");
     setNuevoEmail("");
     setNuevoPassword("");
@@ -112,30 +88,72 @@ function Admin() {
     setNuevoRol("operador");
   }
 
-  async function crearUsuario() {
-    setCreandoUsuario(true);
+  function abrirCrear() {
+    resetFormUsuario();
+    setModalUsuario(true);
+  }
+
+  function abrirEditar(u: UsuarioAdmin) {
+    setEditandoId(u.id);
+    setNuevoNombre(u.nombre_completo ?? "");
+    setNuevoEmail(u.email ?? "");
+    setNuevoPassword("");
+    setNuevoTelefono(u.telefono ?? "");
+    setNuevoRol(u.esAdmin ? "admin" : "operador");
+    setModalUsuario(true);
+  }
+
+  // Autofill solo molesta al crear; en edición no vaciar.
+  useEffect(() => {
+    if (!modalUsuario || editandoId) return;
+    const t = window.setTimeout(() => {
+      setNuevoNombre("");
+      setNuevoEmail("");
+      setNuevoPassword("");
+      setNuevoTelefono("");
+      setNuevoRol("operador");
+    }, 50);
+    return () => window.clearTimeout(t);
+  }, [modalUsuario, editandoId]);
+
+  async function guardarUsuario() {
+    setGuardandoUsuario(true);
     try {
-      const creado = await crearUsuarioApp({
-        data: {
-          email: nuevoEmail,
-          password: nuevoPassword,
-          nombreCompleto: nuevoNombre,
-          telefono: nuevoTelefono,
-          rol: nuevoRol,
-        },
-      });
+      if (editandoId) {
+        const actualizado = await editarUsuarioApp({
+          data: {
+            userId: editandoId,
+            email: nuevoEmail,
+            password: nuevoPassword || undefined,
+            nombreCompleto: nuevoNombre,
+            telefono: nuevoTelefono,
+            rol: nuevoRol,
+          },
+        });
+        toast.success(`Usuario actualizado: ${actualizado.email}`);
+      } else {
+        const creado = await crearUsuarioApp({
+          data: {
+            email: nuevoEmail,
+            password: nuevoPassword,
+            nombreCompleto: nuevoNombre,
+            telefono: nuevoTelefono,
+            rol: nuevoRol,
+          },
+        });
+        toast.success(
+          creado.rol === "admin"
+            ? `Administrador creado: ${creado.email}`
+            : `Operador creado: ${creado.email}`,
+        );
+      }
       resetFormUsuario();
       setModalUsuario(false);
-      toast.success(
-        creado.rol === "admin"
-          ? `Administrador creado: ${creado.email}`
-          : `Operador creado: ${creado.email}`,
-      );
       queryClient.invalidateQueries({ queryKey: ["operadores"] });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudo crear el usuario");
+      toast.error(e instanceof Error ? e.message : "No se pudo guardar el usuario");
     } finally {
-      setCreandoUsuario(false);
+      setGuardandoUsuario(false);
     }
   }
 
@@ -143,7 +161,6 @@ function Admin() {
     setDescargando(true);
     try {
       const { url, nombre: fileName } = await urlDescargaInstaladorAgente();
-      // Forzar nombre con versión (cross-origin ignora a.download)
       const res = await fetch(url);
       if (!res.ok) throw new Error("No se pudo obtener el instalador");
       const blob = await res.blob();
@@ -178,6 +195,8 @@ function Admin() {
       ? `v${instalador.version}`
       : "versión sin número"
     : null;
+
+  const esEdicion = !!editandoId;
 
   return (
     <AppShell titulo="Administración" subtitulo="Usuarios e instalador" esAdmin={sesion?.esAdmin}>
@@ -233,14 +252,14 @@ function Admin() {
           </p>
           <button
             type="button"
-            onClick={() => setModalUsuario(true)}
+            onClick={abrirCrear}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground"
           >
             <UserPlus className="h-3.5 w-3.5" /> Crear usuario
           </button>
         </div>
         <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          Con correo y contraseña ya pueden usar la app. Activá/desactivá el acceso o cambiá el rol.
+          Creá o editá usuarios. Activá/desactivá el acceso cuando haga falta.
         </p>
         <ul className="divide-y divide-border">
           {(operadores ?? []).length === 0 ? (
@@ -252,9 +271,20 @@ function Admin() {
               <li key={o.id} className="flex flex-wrap items-center gap-2 px-4 py-3.5 sm:gap-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{o.nombre_completo || "Sin nombre"}</p>
-                  <p className="text-[11px] text-muted-foreground">{o.telefono || "Sin teléfono"}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {o.email || "Sin correo"}
+                    {o.telefono ? ` · ${o.telefono}` : ""}
+                  </p>
                 </div>
                 <button
+                  type="button"
+                  onClick={() => abrirEditar(o)}
+                  className="flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-[11px] font-medium text-foreground"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Editar
+                </button>
+                <button
+                  type="button"
                   onClick={() => void alternarOperadorActivo(o.id, o.activo)}
                   className={`rounded-md px-2 py-1 text-[11px] font-medium ${
                     o.activo ? "bg-success/12 text-success" : "bg-destructive/10 text-destructive"
@@ -262,14 +292,13 @@ function Admin() {
                 >
                   {o.activo ? "Activo" : "Desactivado"}
                 </button>
-                <button
-                  onClick={() => void alternarAdmin(o.id, o.esAdmin)}
+                <span
                   className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium ${
                     o.esAdmin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
                   }`}
                 >
                   <ShieldCheck className="h-3.5 w-3.5" /> {o.esAdmin ? "Administrador" : "Operador"}
-                </button>
+                </span>
               </li>
             ))
           )}
@@ -279,24 +308,42 @@ function Admin() {
       <Dialog
         open={modalUsuario}
         onOpenChange={(open) => {
-          if (creandoUsuario) return;
+          if (guardandoUsuario) return;
           setModalUsuario(open);
           if (!open) resetFormUsuario();
         }}
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Crear usuario</DialogTitle>
+            <DialogTitle>{esEdicion ? "Editar usuario" : "Crear usuario"}</DialogTitle>
             <DialogDescription>
-              Elegí rol <strong>Operador</strong> (escanea y envía) o <strong>Administrador</strong>{" "}
-              (también gestiona el sistema).
+              {esEdicion
+                ? "Actualizá los datos. Dejá la contraseña en blanco si no querés cambiarla."
+                : "Elegí rol Operador (escanea y envía) o Administrador (también gestiona el sistema)."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-2.5">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-[9999px] h-0 w-0 overflow-hidden opacity-0"
+          >
+            <input type="text" name="username" tabIndex={-1} autoComplete="username" />
+            <input type="password" name="password" tabIndex={-1} autoComplete="current-password" />
+          </div>
+
+          <form
+            className="grid gap-2.5"
+            autoComplete="off"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void guardarUsuario();
+            }}
+          >
             <input
               value={nuevoNombre}
               onChange={(e) => setNuevoNombre(e.target.value)}
+              name="ff-nombre-nuevo"
+              autoComplete="off"
               maxLength={120}
               placeholder="Nombre completo"
               className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
@@ -305,6 +352,8 @@ function Admin() {
               value={nuevoEmail}
               onChange={(e) => setNuevoEmail(e.target.value)}
               type="email"
+              name="ff-correo-nuevo"
+              autoComplete="off"
               maxLength={255}
               placeholder="Correo (para iniciar sesión)"
               className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
@@ -313,13 +362,17 @@ function Admin() {
               value={nuevoPassword}
               onChange={(e) => setNuevoPassword(e.target.value)}
               type="password"
+              name="ff-clave-nueva"
+              autoComplete="new-password"
               maxLength={72}
-              placeholder="Contraseña (mín. 6)"
+              placeholder={esEdicion ? "Nueva contraseña (opcional)" : "Contraseña (mín. 6)"}
               className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
             />
             <input
               value={nuevoTelefono}
               onChange={(e) => setNuevoTelefono(e.target.value)}
+              name="ff-telefono-nuevo"
+              autoComplete="off"
               maxLength={40}
               placeholder="Teléfono (opcional)"
               className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
@@ -327,17 +380,19 @@ function Admin() {
             <select
               value={nuevoRol}
               onChange={(e) => setNuevoRol(e.target.value as RolUsuario)}
+              name="ff-rol-nuevo"
+              autoComplete="off"
               className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
             >
               <option value="operador">Rol: Operador</option>
               <option value="admin">Rol: Administrador</option>
             </select>
-          </div>
+          </form>
 
           <DialogFooter className="gap-2 sm:gap-0">
             <button
               type="button"
-              disabled={creandoUsuario}
+              disabled={guardandoUsuario}
               onClick={() => setModalUsuario(false)}
               className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium"
             >
@@ -345,12 +400,18 @@ function Admin() {
             </button>
             <button
               type="button"
-              disabled={creandoUsuario}
-              onClick={() => void crearUsuario()}
+              disabled={guardandoUsuario}
+              onClick={() => void guardarUsuario()}
               className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
             >
-              {creandoUsuario ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-              Crear
+              {guardandoUsuario ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : esEdicion ? (
+                <Pencil className="h-4 w-4" />
+              ) : (
+                <UserPlus className="h-4 w-4" />
+              )}
+              {esEdicion ? "Guardar" : "Crear"}
             </button>
           </DialogFooter>
         </DialogContent>

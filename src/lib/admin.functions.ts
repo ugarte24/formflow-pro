@@ -166,3 +166,141 @@ export const crearUsuarioApp = createServerFn({ method: "POST" })
       rol: data.rol,
     };
   });
+
+export type UsuarioAdmin = {
+  id: string;
+  email: string;
+  nombre_completo: string | null;
+  telefono: string | null;
+  activo: boolean;
+  esAdmin: boolean;
+  created_at: string | null;
+};
+
+export const listarUsuariosApp = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<UsuarioAdmin[]> => {
+    await asegurarAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const [{ data: perfiles, error: perfilErr }, { data: roles, error: rolesErr }, authRes] =
+      await Promise.all([
+        supabaseAdmin
+          .from("profiles")
+          .select("id, nombre_completo, telefono, activo, created_at")
+          .order("created_at"),
+        supabaseAdmin.from("user_roles").select("user_id, role"),
+        supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
+      ]);
+    if (perfilErr) throw new Error(perfilErr.message);
+    if (rolesErr) throw new Error(rolesErr.message);
+    if (authRes.error) throw new Error(authRes.error.message);
+
+    const emailById = new Map<string, string>();
+    for (const u of authRes.data.users ?? []) {
+      if (u.id && u.email) emailById.set(u.id, u.email);
+    }
+
+    return (perfiles ?? []).map((p) => ({
+      id: p.id,
+      email: emailById.get(p.id) ?? "",
+      nombre_completo: p.nombre_completo,
+      telefono: p.telefono,
+      activo: p.activo !== false,
+      esAdmin: (roles ?? []).some((r) => r.user_id === p.id && r.role === "admin"),
+      created_at: p.created_at,
+    }));
+  });
+
+export const editarUsuarioApp = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator(
+    (input: {
+      userId: string;
+      email: string;
+      password?: string;
+      nombreCompleto: string;
+      telefono?: string;
+      rol: RolUsuario;
+    }) => {
+      const userId = input?.userId?.trim() ?? "";
+      const email = input?.email?.trim().toLowerCase() ?? "";
+      const password = input?.password?.trim() ?? "";
+      const nombreCompleto = input?.nombreCompleto?.trim() ?? "";
+      const telefono = input?.telefono?.trim() ?? "";
+      const rol = input?.rol === "admin" ? "admin" : "operador";
+
+      if (!userId) throw new Error("Usuario no válido");
+      if (!email || !email.includes("@")) throw new Error("Correo no válido");
+      if (password && password.length < 6) {
+        throw new Error("La contraseña debe tener al menos 6 caracteres");
+      }
+      if (!nombreCompleto) throw new Error("Indique el nombre completo");
+      if (nombreCompleto.length > 120) throw new Error("Nombre demasiado largo");
+      if (telefono.length > 40) throw new Error("Teléfono demasiado largo");
+
+      return { userId, email, password, nombreCompleto, telefono, rol };
+    },
+  )
+  .handler(async ({ data, context }) => {
+    await asegurarAdmin(context.supabase, context.userId);
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    if (data.userId === context.userId && data.rol !== "admin") {
+      throw new Error("No podés quitarte el rol de administrador a vos mismo");
+    }
+
+    const authUpdate: {
+      email: string;
+      password?: string;
+      user_metadata: { nombre_completo: string };
+    } = {
+      email: data.email,
+      user_metadata: { nombre_completo: data.nombreCompleto },
+    };
+    if (data.password) authUpdate.password = data.password;
+
+    const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(data.userId, authUpdate);
+    if (authErr) throw new Error(authErr.message);
+
+    const { error: perfilErr } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        nombre_completo: data.nombreCompleto,
+        telefono: data.telefono || null,
+      })
+      .eq("id", data.userId);
+    if (perfilErr) throw new Error(perfilErr.message);
+
+    if (data.rol === "admin") {
+      const { data: existing } = await supabaseAdmin
+        .from("user_roles")
+        .select("user_id")
+        .eq("user_id", data.userId)
+        .eq("role", "admin")
+        .maybeSingle();
+      if (!existing) {
+        const { error: rolErr } = await supabaseAdmin.from("user_roles").insert({
+          user_id: data.userId,
+          role: "admin",
+        });
+        if (rolErr && !rolErr.message.toLowerCase().includes("duplicate")) {
+          throw new Error(rolErr.message);
+        }
+      }
+    } else {
+      const { error: delErr } = await supabaseAdmin
+        .from("user_roles")
+        .delete()
+        .eq("user_id", data.userId)
+        .eq("role", "admin");
+      if (delErr) throw new Error(delErr.message);
+    }
+
+    return {
+      id: data.userId,
+      email: data.email,
+      nombreCompleto: data.nombreCompleto,
+      rol: data.rol,
+    };
+  });

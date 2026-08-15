@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from api_client import AgenteApi
 from app_paths import app_dir, is_frozen
 from ensure_browsers import ensure_playwright_firefox
-from ruat_flow import ContribuyenteYaRegistrado, RuatAutomator
+from ruat_flow import ContribuyenteYaRegistrado, DatosOcrInvalidos, RuatAutomator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,13 +139,17 @@ def main() -> int:
                 except ContribuyenteYaRegistrado as ya:
                     log.warning("CI ya registrado: %s", ya.mensaje)
                     api.resultado(doc_id, "error_automatizacion", ya.mensaje[:500])
+                except DatosOcrInvalidos as datos:
+                    log.warning("OCR inválido: %s", datos.mensaje)
+                    api.resultado(doc_id, "error_automatizacion", datos.mensaje[:500])
                 except Exception as exc:
                     log.exception("Error automatizando %s", doc_id)
                     msg = str(exc)
                     if "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
                         msg = (
-                            "Se cerro Firefox/Nightly. Deje abierta la ventana Nightly del agente, "
-                            "inicie sesion RUAT ahi y vuelva a enviar desde la web."
+                            "Se perdio el control de Nightly. Cierre TODAS las ventanas Nightly, "
+                            "inicie solo Digitalizador Agent, espere la Nightly que abre el agente, "
+                            "inicie sesion RUAT ahi (no abra otra Nightly a mano) y vuelva a enviar."
                         )
                         try:
                             automator.ensure_connected()

@@ -6,7 +6,12 @@
   },
   "registro_contribuyente_natural": {
     "link_role": "link",
-    "link_name": "^Registro Contribuyente Natural$"
+    "link_name": "^Registro\\s+(de\\s+)?Contribuyente\\s+Natural$",
+    "link_names": [
+      "^Registro\\s+Contribuyente\\s+Natural$",
+      "^Registro\\s+de\\s+Contribuyente\\s+Natural$",
+      "Registro\\s+Contribuyente\\s+Natural"
+    ]
   },
   "buscar": {
     "titulo": "REGISTRO CONTRIBUYENTE NATURAL - BUSCAR CONTRIBUYENTE",
@@ -26,9 +31,8 @@
   },
   "asociar": {
     "link_name": "^Asociar$",
-    "no_marcar_foto": true,
-    "criterio": "nombre_mas_parecido",
-    "nota": "Otros municipios: Asociar sin marcar Imagen; elegir Nombre Completo más parecido al CI. Si Gobierno Municipal = RIBERALTA → solo avisar."
+    "accion": "no_usar",
+    "nota": "Otros municipios: NO Asociar. Pulsar Nuevo Contribuyente y continuar el alta. Si Gobierno Municipal = RIBERALTA → solo avisar (RUAT no muestra Nuevo)."
   },
   "ya_registrado": {
     "municipio": "RIBERALTA",

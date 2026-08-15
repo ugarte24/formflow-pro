@@ -32,4 +32,5 @@ También podés publicar con:
 
 - No hace falta instalar Python en el PC del operador
 - El primer arranque descarga Firefox de Playwright (una sola vez)
+- **Nightly:** una sola ventana del agente. RUAT solo cambia el diseño (menú → submenú → formularios). No hace falta abrir otra Nightly. Si se pierde el control: cerrá Nightly → Digitalizador Agent → login RUAT → reenviá
 - Fase 2 Grabar automático: `GRABAR_AUTOMATICO=1` en `.env`
