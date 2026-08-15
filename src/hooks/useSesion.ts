@@ -14,11 +14,17 @@ export function useSesion() {
         supabase.from("user_roles").select("role").eq("user_id", user.id),
       ]);
 
+      if (perfil && perfil.activo === false) {
+        await supabase.auth.signOut();
+        return null;
+      }
+
       return {
         userId: user.id,
         email: user.email ?? "",
         nombre: perfil?.nombre_completo ?? user.email?.split("@")[0] ?? "Operador",
         telefono: perfil?.telefono ?? "",
+        activo: perfil?.activo !== false,
         esAdmin: (roles ?? []).some((r) => r.role === "admin"),
       };
     },

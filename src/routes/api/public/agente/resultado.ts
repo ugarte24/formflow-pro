@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
+import { autorizarAgente } from "@/lib/agente-auth";
 
 const Esquema = z.object({
   documentId: z.string().uuid(),
@@ -18,16 +19,9 @@ export const Route = createFileRoute("/api/public/agente/resultado")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const token = request.headers.get("x-agent-token")?.trim();
-        if (!token || token.length < 20) return json({ error: "Token del agente requerido" }, 401);
-
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-        const { data: pc } = await supabaseAdmin
-          .from("computers")
-          .select("id, activo")
-          .eq("agent_token", token)
-          .maybeSingle();
-        if (!pc || !pc.activo) return json({ error: "Computador no autorizado" }, 403);
+        const auth = await autorizarAgente(request);
+        if ("error" in auth) return auth.error;
+        const { pc, supabaseAdmin } = auth;
 
         const parsed = Esquema.safeParse(await request.json().catch(() => null));
         if (!parsed.success) return json({ error: "Payload inválido" }, 400);

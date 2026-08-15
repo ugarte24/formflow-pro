@@ -1,43 +1,43 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+const BUCKET = "agente";
+const PATH = "releases/DigitalizadorAgent-Setup.zip";
+
 async function asegurarAdmin(supabase: any, userId: string) {
   const { data } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
   if (!data) throw new Error("Solo un administrador puede realizar esta acción");
 }
 
-export const obtenerTokenAgente = createServerFn({ method: "POST" })
+export const estadoInstaladorAgente = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { computerId: string }) => {
-    if (!input?.computerId) throw new Error("Falta el computador");
-    return input;
-  })
-  .handler(async ({ data, context }) => {
+  .handler(async ({ context }) => {
     await asegurarAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: pc, error } = await supabaseAdmin
-      .from("computers")
-      .select("agent_token")
-      .eq("id", data.computerId)
-      .single();
+    const { data, error } = await supabaseAdmin.storage.from(BUCKET).list("releases", {
+      search: "DigitalizadorAgent-Setup.zip",
+      limit: 5,
+    });
     if (error) throw new Error(error.message);
-    return { token: pc.agent_token as string };
+    const file = (data ?? []).find((f) => f.name === "DigitalizadorAgent-Setup.zip");
+    if (!file) return { disponible: false as const };
+
+    return {
+      disponible: true as const,
+      nombre: file.name,
+      bytes: file.metadata?.size ?? null,
+      actualizado: file.updated_at ?? file.created_at ?? null,
+    };
   });
 
-export const rotarTokenAgente = createServerFn({ method: "POST" })
+export const urlDescargaInstaladorAgente = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: { computerId: string }) => {
-    if (!input?.computerId) throw new Error("Falta el computador");
-    return input;
-  })
-  .handler(async ({ data, context }) => {
+  .handler(async ({ context }) => {
     await asegurarAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const nuevo = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "").slice(0, 16);
-    const { error } = await supabaseAdmin
-      .from("computers")
-      .update({ agent_token: nuevo })
-      .eq("id", data.computerId);
-    if (error) throw new Error(error.message);
-    return { token: nuevo };
+    const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(PATH, 60 * 30);
+    if (error || !data?.signedUrl) {
+      throw new Error(error?.message ?? "No hay instalador publicado. Subí el ZIP desde Admin o con el script de publicación.");
+    }
+    return { url: data.signedUrl, nombre: "DigitalizadorAgent-Setup.zip" };
   });

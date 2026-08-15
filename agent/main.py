@@ -11,6 +11,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from api_client import AgenteApi
+from app_paths import app_dir, is_frozen
+from ensure_browsers import ensure_playwright_firefox
 from ruat_flow import ContribuyenteYaRegistrado, RuatAutomator
 
 logging.basicConfig(
@@ -22,23 +24,90 @@ log = logging.getLogger("digitalizador-agent")
 
 
 def main() -> int:
-    load_dotenv(Path(__file__).with_name(".env"))
+    base_path = app_dir()
+    env_path = base_path / ".env"
+    load_dotenv(env_path)
+
+    if not env_path.exists():
+        log.error("Falta el archivo .env junto al programa: %s", env_path)
+        log.error("Copie .env.example a .env y complete BASE_URL + CODIGO_PC")
+        if is_frozen():
+            input("Presione Enter para salir…")
+        return 1
+
     base = os.getenv("BASE_URL", "").rstrip("/")
-    token = os.getenv("AGENT_TOKEN", "").strip()
+    # Preferido: código de PC (sin token). Compat: AGENT_TOKEN legado.
+    codigo = (os.getenv("CODIGO_PC") or os.getenv("COMPUTER_CODE") or "").strip().upper()
+    token_legado = os.getenv("AGENT_TOKEN", "").strip()
     poll = float(os.getenv("POLL_SECONDS", "4"))
     download = Path(
         os.path.expandvars(os.getenv("DOWNLOAD_DIR", r"%USERPROFILE%\DigitalizadorAgent\downloads"))
     )
     download.mkdir(parents=True, exist_ok=True)
 
-    if not base or len(token) < 20:
-        log.error("Configure BASE_URL y AGENT_TOKEN en agent/.env (vea .env.example)")
+    if not base:
+        log.error("Configure BASE_URL en %s", env_path)
+        if is_frozen():
+            input("Presione Enter para salir…")
         return 1
 
-    api = AgenteApi(base, token)
+    if not codigo and not (token_legado and len(token_legado) >= 20):
+        log.error("Configure CODIGO_PC en %s (ej. PC-VEN-01). Ya no se usa token.", env_path)
+        if is_frozen():
+            input("Presione Enter para salir…")
+        return 1
+
+    dry = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
+    if not dry:
+        try:
+            ensure_playwright_firefox()
+        except Exception:
+            if is_frozen():
+                input("Presione Enter para salir…")
+            return 1
+
+    if codigo:
+        api = AgenteApi(base, codigo)
+        log.info("Auth por código de PC: %s", codigo)
+    else:
+        # Compatibilidad temporal con instalaciones viejas
+        from requests import Session
+
+        class _Legacy:
+            def __init__(self) -> None:
+                self.session = Session()
+                self.session.headers.update(
+                    {"x-agent-token": token_legado, "Accept": "application/json"}
+                )
+                self.base = base
+
+            def pendientes(self) -> dict:
+                r = self.session.get(f"{self.base}/api/public/agente/pendientes", timeout=30)
+                r.raise_for_status()
+                return r.json()
+
+            def resultado(self, document_id: str, estado: str, mensaje: str | None = None) -> dict:
+                body = {"documentId": document_id, "estado": estado}
+                if mensaje:
+                    body["mensaje"] = mensaje
+                r = self.session.post(
+                    f"{self.base}/api/public/agente/resultado", json=body, timeout=30
+                )
+                r.raise_for_status()
+                return r.json()
+
+        api = _Legacy()  # type: ignore[assignment]
+        log.warning("Usando AGENT_TOKEN legado — migre a CODIGO_PC")
+
     automator = RuatAutomator(download_dir=download)
 
-    log.info("Agente iniciado · %s · poll=%ss · mode=%s", base, poll, automator.mode)
+    log.info(
+        "Agente iniciado · %s · poll=%ss · mode=%s · dir=%s",
+        base,
+        poll,
+        automator.mode,
+        base_path,
+    )
     if automator.dry_run:
         log.warning("DRY_RUN activo: no interactúa con Firefox, solo reporta pendientes")
 
@@ -47,8 +116,9 @@ def main() -> int:
             automator.connect()
     except Exception as exc:
         log.error("No se pudo conectar a Firefox/Playwright: %s", exc)
-        log.error("Ejecute: playwright install firefox")
-        log.error("O use FIREFOX_MODE=connect_cdp con start-firefox-ruat.ps1")
+        log.error("Verifique la instalación de Firefox (primer arranque) o FIREFOX_MODE")
+        if is_frozen():
+            input("Presione Enter para salir…")
         return 1
 
     while True:

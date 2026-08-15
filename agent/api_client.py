@@ -4,12 +4,14 @@ import requests
 
 
 class AgenteApi:
-    def __init__(self, base_url: str, token: str) -> None:
+    """Auth por código de PC (x-computer-code). Sin token secreto."""
+
+    def __init__(self, base_url: str, computer_code: str) -> None:
         self.base = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "x-agent-token": token,
+                "x-computer-code": computer_code.strip().upper(),
                 "Accept": "application/json",
             }
         )

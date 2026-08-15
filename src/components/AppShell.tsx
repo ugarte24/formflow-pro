@@ -4,6 +4,7 @@ import { Home, History, User, ScanLine, Shield, LogOut } from "lucide-react";
 import type { ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
+import { BrandMark } from "@/components/BrandMark";
 
 export function AppShell({
   children,
@@ -32,6 +33,7 @@ export function AppShell({
     <div className="min-h-screen bg-background pb-24">
       <header className="sticky top-0 z-20 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3.5">
+          <BrandMark className="h-8 w-8" iconClassName="h-4 w-4" />
           <div className="min-w-0 flex-1">
             <p className="label-caps">Digitalizador</p>
             <h1 className="truncate text-lg leading-tight font-semibold">{titulo}</h1>

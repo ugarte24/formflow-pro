@@ -36,10 +36,16 @@ class ContribuyenteYaRegistrado(Exception):
 
 
 def _load_selectors() -> dict[str, Any]:
-    if not SELECTORS_PATH.exists():
+    try:
+        from app_paths import resolve_data_file
+
+        path = resolve_data_file("selectors.json")
+    except Exception:
+        path = SELECTORS_PATH
+    if not path.exists():
         log.warning("No hay selectors.json — se usan valores por defecto embebidos")
         return {}
-    return json.loads(SELECTORS_PATH.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 class RuatAutomator:

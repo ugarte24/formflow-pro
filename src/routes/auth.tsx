@@ -1,9 +1,10 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ScanLine, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
+import { BrandMark } from "@/components/BrandMark";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -48,6 +49,17 @@ function AuthPage() {
         password: parsed.data.password,
       });
       if (error) throw error;
+
+      const { data: userData } = await supabase.auth.getUser();
+      const uid = userData.user?.id;
+      if (uid) {
+        const { data: perfil } = await supabase.from("profiles").select("activo").eq("id", uid).maybeSingle();
+        if (perfil && perfil.activo === false) {
+          await supabase.auth.signOut();
+          throw new Error("Tu cuenta está desactivada. Pedile al administrador que la active.");
+        }
+      }
+
       router.navigate({ to: "/inicio", replace: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo iniciar sesión");
@@ -60,9 +72,7 @@ function AuthPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ScanLine className="h-5 w-5" />
-          </span>
+          <BrandMark />
           <span className="font-display text-base font-semibold">Digitalizador</span>
         </div>
 

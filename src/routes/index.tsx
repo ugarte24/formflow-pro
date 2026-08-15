@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ScanLine, Cpu, ShieldCheck, Timer, ArrowRight } from "lucide-react";
+import { BrandMark } from "@/components/BrandMark";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -16,7 +17,9 @@ export const Route = createFileRoute("/")({
         content: "De 10 minutos de digitación manual a menos de 1 minuto por registro.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
+      { property: "og:image", content: "/icon-192.png" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:image", content: "/icon-192.png" },
     ],
   }),
   component: Index,
@@ -27,9 +30,7 @@ function Index() {
     <div className="min-h-screen bg-background">
       <header className="mx-auto flex max-w-5xl items-center justify-between px-5 py-5">
         <div className="flex items-center gap-2">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ScanLine className="h-5 w-5" />
-          </span>
+          <BrandMark />
           <span className="font-display text-base font-semibold">Digitalizador</span>
         </div>
         <Link

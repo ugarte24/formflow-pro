@@ -170,6 +170,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          activo: boolean
           created_at: string
           id: string
           nombre_completo: string | null
@@ -177,6 +178,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          activo?: boolean
           created_at?: string
           id: string
           nombre_completo?: string | null
@@ -184,6 +186,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          activo?: boolean
           created_at?: string
           id?: string
           nombre_completo?: string | null

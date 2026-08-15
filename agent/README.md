@@ -2,15 +2,29 @@
 
 Agente de escritorio que consulta la API de FormFlow Pro y completa el registro **Contribuyente Natural** en RUAT (Firefox).
 
-## Requisitos
+## Instalación para el PC del operador (.exe)
+
+Ver guía completa: **[INSTALAR-EXE.md](./INSTALAR-EXE.md)**
+
+Resumen:
+
+```powershell
+# En PC de desarrollo:
+.\build_exe.ps1
+
+# En PC del operador (con la carpeta dist generada):
+.\Instalar-en-PC-Operador.ps1
+```
+
+## Requisitos (modo desarrollo / Python)
 
 - Windows 10/11
 - Python 3.11+
 - Firefox instalado
-- Token del PC (panel Admin → ver token)
+- Código del PC (panel Admin → Computadores, ej. PC-VEN-01). Sin token.
 - Sesión RUAT en el perfil del agente (IP autorizada del PC)
 
-## Configuración
+## Configuración (desarrollo)
 
 ```powershell
 cd agent
@@ -19,7 +33,7 @@ python -m venv .venv
 pip install -r requirements.txt
 playwright install firefox
 copy .env.example .env
-# Editar .env: BASE_URL + AGENT_TOKEN
+# Editar .env: BASE_URL + CODIGO_PC
 ```
 
 ## Modos de Firefox

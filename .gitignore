@@ -30,6 +30,9 @@ service-account*.json
 agent/.venv/
 agent/.env
 agent/downloads/
+agent/build/
+agent/dist/
+agent/*.spec.bak
 
 # Supabase CLI local
 supabase/.temp/
