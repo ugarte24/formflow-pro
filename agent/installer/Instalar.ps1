@@ -1,5 +1,4 @@
-# Instala Digitalizador Agent como programa normal en el PC del operador.
-# Se ejecuta desde la carpeta del paquete de instalación (junto a DigitalizadorAgent.exe).
+# Instala Digitalizador Agent en el PC del operador.
 # Uso: doble clic en Instalar.bat
 
 param(
@@ -7,104 +6,125 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Origen = $PSScriptRoot
 
-if (-not (Test-Path (Join-Path $Origen "DigitalizadorAgent.exe"))) {
-  Write-Host "ERROR: No se encuentra DigitalizadorAgent.exe junto a este instalador." -ForegroundColor Red
-  pause
+try {
+  $Origen = $PSScriptRoot
+  if (-not $Origen) { $Origen = Split-Path -Parent $MyInvocation.MyCommand.Path }
+
+  Write-Host ""
+  Write-Host "========================================" -ForegroundColor Cyan
+  Write-Host "  Instalador Digitalizador Agent"
+  Write-Host "========================================"
+  Write-Host "Origen : $Origen"
+  Write-Host "Destino: $Destino"
+  Write-Host ""
+
+  $exe = Join-Path $Origen "DigitalizadorAgent.exe"
+  if (-not (Test-Path $exe)) {
+    throw "No se encuentra DigitalizadorAgent.exe. Extraiga el ZIP completo antes de instalar."
+  }
+
+  New-Item -ItemType Directory -Force -Path $Destino | Out-Null
+
+  # Conservar .env existente
+  $envDest = Join-Path $Destino ".env"
+  $envBak = $null
+  if (Test-Path $envDest) {
+    $envBak = Join-Path $env:TEMP "digitalizador-agent.env.bak"
+    Copy-Item -Force $envDest $envBak
+    Write-Host "Se conservara tu configuracion (.env) actual."
+  }
+
+  Write-Host "Copiando archivos..."
+  Get-ChildItem $Origen -Force | Where-Object {
+    $_.Name -notin @("Instalar.bat", "Instalar.ps1", "Desinstalar.bat", "Desinstalar.ps1")
+  } | ForEach-Object {
+    $target = Join-Path $Destino $_.Name
+    if ($_.PSIsContainer) {
+      if (Test-Path $target) {
+        Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+      }
+      Copy-Item -Recurse -Force $_.FullName -Destination $Destino
+    } else {
+      Copy-Item -Force $_.FullName -Destination $Destino
+    }
+  }
+
+  if ($envBak -and (Test-Path $envBak)) {
+    Copy-Item -Force $envBak $envDest
+    Remove-Item $envBak -ErrorAction SilentlyContinue
+  }
+
+  if (-not (Test-Path $envDest)) {
+    $example = Join-Path $Destino ".env.example"
+    if (Test-Path $example) {
+      Copy-Item $example $envDest
+    } else {
+      @(
+        "BASE_URL=https://formflow-pro-sigma.vercel.app"
+        "CODIGO_PC=PC-DEFAULT"
+        "FIREFOX_MODE=persistent"
+        "POLL_SECONDS=4"
+      ) | Set-Content -Encoding ASCII $envDest
+    }
+    Write-Host ""
+    Write-Host "IMPORTANTE: Revise BASE_URL en el Bloc de notas. CODIGO_PC=PC-DEFAULT." -ForegroundColor Yellow
+    Start-Process notepad $envDest
+    Write-Host "Cuando guarde y cierre el Bloc de notas, pulse Enter aqui..."
+    Read-Host | Out-Null
+  }
+
+  $bat = Join-Path $Destino "Iniciar-Agente.bat"
+  if (-not (Test-Path $bat)) {
+    @(
+      "@echo off"
+      "cd /d `"%~dp0`""
+      "DigitalizadorAgent.exe"
+      "pause"
+    ) | Set-Content -Encoding ASCII $bat
+  }
+
+  $desktop = [Environment]::GetFolderPath("Desktop")
+  $wsh = New-Object -ComObject WScript.Shell
+  $lnkDesk = Join-Path $desktop "Digitalizador Agent.lnk"
+  $s = $wsh.CreateShortcut($lnkDesk)
+  $s.TargetPath = $bat
+  $s.WorkingDirectory = $Destino
+  $s.Description = "Agente Digitalizador - RUAT"
+  $s.Save()
+
+  $startDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Digitalizador"
+  New-Item -ItemType Directory -Force -Path $startDir | Out-Null
+  $lnkStart = Join-Path $startDir "Digitalizador Agent.lnk"
+  $s2 = $wsh.CreateShortcut($lnkStart)
+  $s2.TargetPath = $bat
+  $s2.WorkingDirectory = $Destino
+  $s2.Description = "Agente Digitalizador - RUAT"
+  $s2.Save()
+
+  Copy-Item -Force (Join-Path $Origen "Desinstalar.ps1") (Join-Path $Destino "Desinstalar.ps1") -ErrorAction SilentlyContinue
+  Copy-Item -Force (Join-Path $Origen "Desinstalar.bat") (Join-Path $Destino "Desinstalar.bat") -ErrorAction SilentlyContinue
+
+  Write-Host ""
+  Write-Host "Instalacion completada." -ForegroundColor Green
+  Write-Host "- Acceso directo Escritorio: Digitalizador Agent"
+  Write-Host "- Menu Inicio -> Digitalizador"
+  Write-Host "- Carpeta: $Destino"
+  Write-Host ""
+  Write-Host "Para usarlo: doble clic en 'Digitalizador Agent'."
+  Write-Host "El primer arranque descarga Firefox (una sola vez)."
+  Write-Host ""
+  exit 0
+}
+catch {
+  Write-Host ""
+  Write-Host "ERROR en la instalacion:" -ForegroundColor Red
+  Write-Host $_.Exception.Message -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Consejos:"
+  Write-Host "1) Extraiga el ZIP a una carpeta (Escritorio) y ejecute Instalar.bat desde ahi."
+  Write-Host "2) Cierre Digitalizador Agent si estaba abierto."
+  Write-Host "3) Pruebe clic derecho -> Ejecutar como administrador."
+  Write-Host ""
   exit 1
 }
-
-Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Instalador Digitalizador Agent"
-Write-Host "========================================"
-Write-Host "Destino: $Destino"
-Write-Host ""
-
-New-Item -ItemType Directory -Force -Path $Destino | Out-Null
-
-# Conservar .env existente
-$envDest = Join-Path $Destino ".env"
-$envBak = $null
-if (Test-Path $envDest) {
-  $envBak = Join-Path $env:TEMP "digitalizador-agent.env.bak"
-  Copy-Item -Force $envDest $envBak
-  Write-Host "Se conservará tu configuración (.env) actual."
-}
-
-Write-Host "Copiando archivos…"
-Get-ChildItem $Origen -Force | Where-Object {
-  $_.Name -notin @("Instalar.bat", "Instalar.ps1", "Desinstalar.bat", "Desinstalar.ps1")
-} | ForEach-Object {
-  Copy-Item -Recurse -Force $_.FullName -Destination $Destino
-}
-
-if ($envBak -and (Test-Path $envBak)) {
-  Copy-Item -Force $envBak $envDest
-  Remove-Item $envBak -ErrorAction SilentlyContinue
-}
-
-if (-not (Test-Path $envDest)) {
-  $example = Join-Path $Destino ".env.example"
-  if (Test-Path $example) {
-    Copy-Item $example $envDest
-  } else {
-    @"
-BASE_URL=https://formflow-pro-sigma.vercel.app
-CODIGO_PC=PC-DEFAULT
-FIREFOX_MODE=persistent
-POLL_SECONDS=4
-"@ | Set-Content -Encoding UTF8 $envDest
-  }
-  Write-Host ""
-  Write-Host "IMPORTANTE: Revisá BASE_URL en el Bloc de notas. CODIGO_PC ya viene como PC-DEFAULT." -ForegroundColor Yellow
-  Write-Host "El acceso a la app es con usuario y contraseña (los crea el administrador)." -ForegroundColor Yellow
-  Start-Process notepad $envDest
-  Write-Host "Cuando guardes y cierres el Bloc de notas, pulsá Enter aquí…"
-  Read-Host | Out-Null
-}
-
-# Acceso directo Escritorio
-$desktop = [Environment]::GetFolderPath("Desktop")
-$bat = Join-Path $Destino "Iniciar-Agente.bat"
-if (-not (Test-Path $bat)) {
-  @"
-@echo off
-cd /d "%~dp0"
-DigitalizadorAgent.exe
-pause
-"@ | Set-Content -Encoding ASCII $bat
-}
-
-$wsh = New-Object -ComObject WScript.Shell
-$lnkDesk = Join-Path $desktop "Digitalizador Agent.lnk"
-$s = $wsh.CreateShortcut($lnkDesk)
-$s.TargetPath = $bat
-$s.WorkingDirectory = $Destino
-$s.Description = "Agente Digitalizador — RUAT"
-$s.Save()
-
-# Menú Inicio
-$startDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Digitalizador"
-New-Item -ItemType Directory -Force -Path $startDir | Out-Null
-$lnkStart = Join-Path $startDir "Digitalizador Agent.lnk"
-$s2 = $wsh.CreateShortcut($lnkStart)
-$s2.TargetPath = $bat
-$s2.WorkingDirectory = $Destino
-$s2.Description = "Agente Digitalizador — RUAT"
-$s2.Save()
-
-# Desinstalador en la carpeta instalada
-Copy-Item -Force (Join-Path $Origen "Desinstalar.ps1") (Join-Path $Destino "Desinstalar.ps1") -ErrorAction SilentlyContinue
-Copy-Item -Force (Join-Path $Origen "Desinstalar.bat") (Join-Path $Destino "Desinstalar.bat") -ErrorAction SilentlyContinue
-
-Write-Host ""
-Write-Host "Instalación completada." -ForegroundColor Green
-Write-Host "- Acceso directo en el Escritorio: Digitalizador Agent"
-Write-Host "- Menú Inicio → Digitalizador"
-Write-Host "- Carpeta: $Destino"
-Write-Host ""
-Write-Host "Para usarlo: doble clic en 'Digitalizador Agent'."
-Write-Host "El primer arranque descarga Firefox (una sola vez)."
-Write-Host ""
-pause
