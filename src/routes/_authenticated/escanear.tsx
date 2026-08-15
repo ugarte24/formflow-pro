@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, Camera, Check, Loader2, RefreshCw, Sun, Focus, UserRound } from "lucide-react";
+import { AlertTriangle, Camera, Check, Loader2, Sun, Focus, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
@@ -246,9 +246,8 @@ function Escanear() {
       : "Use la cámara trasera y capture el rostro del contribuyente (≤ 90 KB)";
 
   return (
-    <AppShell titulo={titulo} subtitulo={subtitulo} esAdmin={sesion?.esAdmin}>
-      {/* Altura fija (no solo max-h) para que flex-1 agrande la cámara */}
-      <div className="-mt-1 flex h-[calc(100dvh-8.75rem)] flex-col gap-2 overflow-hidden pb-1">
+    <AppShell titulo={titulo} subtitulo={subtitulo} esAdmin={sesion?.esAdmin} fill>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
         <div className="ink-panel relative min-h-0 w-full flex-1 overflow-hidden">
           <video
             ref={videoRef}
@@ -305,22 +304,14 @@ function Escanear() {
             </p>
           ) : null}
 
-          <div className="flex gap-2">
-            <button
-              onClick={() => void capturar()}
-              disabled={estado !== "listo"}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
-            >
-              {fase === "ci" ? <Camera className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
-              {fase === "ci" ? "Capturar documento" : "Capturar fotografía"}
-            </button>
-            <button
-              onClick={() => router.navigate({ to: "/inicio" })}
-              className="rounded-xl border border-border px-4 py-3 text-sm font-medium"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            onClick={() => void capturar()}
+            disabled={estado !== "listo"}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+          >
+            {fase === "ci" ? <Camera className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+            {fase === "ci" ? "Capturar documento" : "Capturar fotografía"}
+          </button>
         </div>
       </div>
     </AppShell>

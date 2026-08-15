@@ -12,12 +12,15 @@ export function AppShell({
   subtitulo,
   esAdmin,
   accion,
+  fill,
 }: {
   children: ReactNode;
   titulo: string;
   subtitulo?: string | undefined;
   esAdmin?: boolean | undefined;
   accion?: ReactNode | undefined;
+  /** Pantalla a altura del viewport sin scroll (p. ej. escanear). */
+  fill?: boolean | undefined;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -30,8 +33,14 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen bg-background pb-24">
-      <header className="sticky top-0 z-20 border-b border-border bg-surface/90 backdrop-blur">
+    <div
+      className={
+        fill
+          ? "flex h-dvh flex-col overflow-hidden bg-background"
+          : "min-h-screen bg-background pb-24"
+      }
+    >
+      <header className="sticky top-0 z-20 shrink-0 border-b border-border bg-surface/90 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-3.5">
           <BrandMark className="h-8 w-8" iconClassName="h-4 w-4" />
           <div className="min-w-0 flex-1">
@@ -51,9 +60,23 @@ export function AppShell({
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-5">{children}</main>
+      <main
+        className={
+          fill
+            ? "mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 py-2"
+            : "mx-auto max-w-3xl px-4 py-5"
+        }
+      >
+        {children}
+      </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur">
+      <nav
+        className={
+          fill
+            ? "z-20 shrink-0 border-t border-border bg-surface/95 backdrop-blur"
+            : "fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
+        }
+      >
         <div className="mx-auto flex max-w-3xl items-stretch justify-around px-2 py-1.5">
           <NavItem to="/inicio" icon={<Home className="h-5 w-5" />} label="Inicio" />
           <NavItem to="/escanear" icon={<ScanLine className="h-5 w-5" />} label="Escanear" />
