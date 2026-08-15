@@ -127,6 +127,8 @@ def main() -> int:
                 doc_id = doc["id"]
                 log.info("Procesando %s · CI %s", doc_id, doc.get("numero_documento"))
                 try:
+                    if not automator.dry_run:
+                        automator.ensure_connected()
                     automator.procesar(doc)
                     api.resultado(
                         doc_id,
@@ -139,8 +141,18 @@ def main() -> int:
                     api.resultado(doc_id, "error_automatizacion", ya.mensaje[:500])
                 except Exception as exc:
                     log.exception("Error automatizando %s", doc_id)
+                    msg = str(exc)
+                    if "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
+                        msg = (
+                            "Se cerro Firefox/Nightly. Deje abierta la ventana Nightly del agente, "
+                            "inicie sesion RUAT ahi y vuelva a enviar desde la web."
+                        )
+                        try:
+                            automator.ensure_connected()
+                        except Exception as recon:
+                            log.error("No se pudo reconectar Firefox: %s", recon)
                     try:
-                        api.resultado(doc_id, "error_automatizacion", str(exc)[:500])
+                        api.resultado(doc_id, "error_automatizacion", msg[:500])
                     except Exception as report_exc:
                         log.error("No se pudo reportar error: %s", report_exc)
         except KeyboardInterrupt:

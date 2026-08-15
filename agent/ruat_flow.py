@@ -156,11 +156,43 @@ class RuatAutomator:
                 self._context.close()
             elif self._browser:
                 self._browser.close()
+        except Exception:
+            pass
         finally:
+            self._context = None
+            self._browser = None
+            self.page = None
             if self._pw:
-                self._pw.stop()
+                try:
+                    self._pw.stop()
+                except Exception:
+                    pass
+                self._pw = None
+
+    def _pagina_viva(self) -> bool:
+        try:
+            if not self.page:
+                return False
+            _ = self.page.url
+            return True
+        except Exception:
+            return False
+
+    def ensure_connected(self) -> None:
+        """Reabre Firefox si el operador cerro Nightly o se cayo el contexto."""
+        if self.dry_run:
+            return
+        if self._pagina_viva():
+            return
+        log.warning("Firefox/Nightly no responde — reconectando…")
+        try:
+            self.close()
+        except Exception:
+            pass
+        self.connect()
 
     def procesar(self, doc: dict) -> None:
+        self.ensure_connected()
         assert self.page is not None
         page = self.page
 
