@@ -6,7 +6,7 @@
 2. Pulsá **Descargar DigitalizadorAgent-Setup.zip**
 3. Pasá el ZIP al PC del operador (USB / Drive / WhatsApp)
 4. Descomprimí → doble clic en **Instalar.bat**
-5. Completá `BASE_URL` y `CODIGO_PC` (ej. `PC-VEN-01`) — **sin token**
+5. Completá `BASE_URL` si hace falta; `CODIGO_PC=PC-DEFAULT` ya viene listo — **sin token**
 6. Usá el icono **Digitalizador Agent** del Escritorio
 
 El programa queda en `%LOCALAPPDATA%\Digitalizador\DigitalizadorAgent`.

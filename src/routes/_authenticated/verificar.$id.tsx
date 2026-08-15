@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, Monitor, UserRound } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/_authenticated/verificar/$id")({
   head: () => ({
     meta: [
       { title: "Verificar datos extraídos — Digitalizador" },
-      { name: "description", content: "Revisa y corrige los datos leídos antes de enviarlos al computador autorizado." },
+      { name: "description", content: "Revisa y corrige los datos leídos antes de enviarlos al PC del operador." },
       { property: "og:title", content: "Verificar datos extraídos — Digitalizador" },
       { property: "og:description", content: "Validación humana antes de automatizar el formulario." },
     ],
@@ -25,7 +25,6 @@ function Verificar() {
   const router = useRouter();
   const { data: sesion } = useSesion();
   const [valores, setValores] = useState<Record<string, string>>({});
-  const [computerId, setComputerId] = useState<string>("");
   const [guardando, setGuardando] = useState(false);
 
   const { data: doc, refetch } = useQuery({
@@ -39,29 +38,12 @@ function Verificar() {
       ["confirmado", "enviado_pc"].includes((query.state.data?.status as string) ?? "") ? 4000 : false,
   });
 
-  const { data: computadores } = useQuery({
-    queryKey: ["computadores-activos"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("computers")
-        .select("id, nombre, codigo, activo, last_seen_at")
-        .eq("activo", true)
-        .order("nombre");
-      return data ?? [];
-    },
-  });
-
   useEffect(() => {
     if (!doc) return;
     const iniciales: Record<string, string> = {};
     for (const campo of CAMPOS) iniciales[campo.key] = (doc[campo.key] as string | null) ?? "";
     setValores(iniciales);
-    if (doc.computer_id) setComputerId(doc.computer_id);
   }, [doc]);
-
-  useEffect(() => {
-    if (!computerId && computadores && computadores.length > 0) setComputerId(computadores[0]!.id);
-  }, [computadores, computerId]);
 
   const confianza = (doc?.confianza ?? {}) as Record<string, number>;
   const revisar = CAMPOS.filter((c) => (confianza[c.key] ?? 0) < 0.85 || !valores[c.key]);
@@ -88,10 +70,23 @@ function Verificar() {
       toast.error(`Complete los campos: ${faltantes.join(", ")}`);
       return;
     }
+
+    // PC único del sistema (ya no se elige en pantalla)
+    const { data: pcDefault } = await supabase
+      .from("computers")
+      .select("id")
+      .eq("codigo", "PC-DEFAULT")
+      .eq("activo", true)
+      .maybeSingle();
+    const { data: pcFallback } = pcDefault
+      ? { data: null }
+      : await supabase.from("computers").select("id").eq("activo", true).order("created_at").limit(1).maybeSingle();
+    const computerId = pcDefault?.id ?? pcFallback?.id;
     if (!computerId) {
-      toast.error("Seleccione el computador autorizado de destino");
+      toast.error("No hay PC del agente configurado. Contacte al administrador.");
       return;
     }
+
     setGuardando(true);
     try {
       const { error } = await supabase
@@ -257,24 +252,6 @@ function Verificar() {
 
       {!bloqueado ? (
         <>
-          <div className="panel mt-4 p-4">
-            <span className="label-caps flex items-center gap-1.5">
-              <Monitor className="h-3.5 w-3.5" /> Computador autorizado
-            </span>
-            <select
-              value={computerId}
-              onChange={(e) => setComputerId(e.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
-            >
-              {(computadores ?? []).length === 0 ? <option value="">No hay computadores activos</option> : null}
-              {(computadores ?? []).map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre} · {c.codigo}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="mt-4 space-y-2.5">
             <button
               onClick={() => void confirmar()}

@@ -51,14 +51,14 @@ if (-not (Test-Path $envDest)) {
   } else {
     @"
 BASE_URL=https://formflow-pro-sigma.vercel.app
-CODIGO_PC=
+CODIGO_PC=PC-DEFAULT
 FIREFOX_MODE=persistent
 POLL_SECONDS=4
 "@ | Set-Content -Encoding UTF8 $envDest
   }
   Write-Host ""
-  Write-Host "IMPORTANTE: Completá BASE_URL y CODIGO_PC (ej. PC-VEN-01) en el Bloc de notas." -ForegroundColor Yellow
-  Write-Host "Ya no se usa token. El admin activa/desactiva operadores desde la web." -ForegroundColor Yellow
+  Write-Host "IMPORTANTE: Revisá BASE_URL en el Bloc de notas. CODIGO_PC ya viene como PC-DEFAULT." -ForegroundColor Yellow
+  Write-Host "El acceso a la app es con usuario y contraseña (los crea el administrador)." -ForegroundColor Yellow
   Start-Process notepad $envDest
   Write-Host "Cuando guardes y cierres el Bloc de notas, pulsá Enter aquí…"
   Read-Host | Out-Null
