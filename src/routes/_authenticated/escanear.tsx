@@ -71,7 +71,8 @@ function Escanear() {
   );
 
   useEffect(() => {
-    void iniciarCamara(fase === "ci" ? "environment" : "user");
+    // Siempre camara trasera: CI y fotografia del contribuyente
+    void iniciarCamara("environment");
     return () => detener();
   }, [fase, iniciarCamara, detener]);
 
@@ -242,7 +243,7 @@ function Escanear() {
   const subtitulo =
     fase === "ci"
       ? "Coloque el documento dentro del marco"
-      : "Capture el rostro del contribuyente (se comprimirá a ≤ 90 KB)";
+      : "Use la cámara trasera y capture el rostro del contribuyente (≤ 90 KB)";
 
   return (
     <AppShell titulo={titulo} subtitulo={subtitulo} esAdmin={sesion?.esAdmin}>
@@ -298,7 +299,7 @@ function Escanear() {
           </>
         ) : (
           <p className="text-sm text-muted-foreground">
-            Encuadre el rostro en el círculo. La foto se comprimirá automáticamente para RUAT (máximo 90 KB).
+            Apunte la cámara trasera al rostro. La foto se comprimirá automáticamente para RUAT (máximo 90 KB).
           </p>
         )}
 
