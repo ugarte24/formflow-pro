@@ -143,14 +143,19 @@ function Admin() {
     setDescargando(true);
     try {
       const { url, nombre: fileName } = await urlDescargaInstaladorAgente();
+      // Forzar nombre con versión (cross-origin ignora a.download)
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("No se pudo obtener el instalador");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = objectUrl;
       a.download = fileName;
-      a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      toast.success("Descarga iniciada. Pasá el ZIP al PC del operador.");
+      URL.revokeObjectURL(objectUrl);
+      toast.success(`Descarga: ${fileName}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "No se pudo descargar el instalador");
     } finally {

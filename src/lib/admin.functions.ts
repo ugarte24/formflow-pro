@@ -34,7 +34,11 @@ export const estadoInstaladorAgente = createServerFn({ method: "GET" })
 
     if (metaRes.data && !metaRes.error) {
       try {
-        const text = await metaRes.data.text();
+        const raw = metaRes.data;
+        const text =
+          typeof (raw as Blob).text === "function"
+            ? await (raw as Blob).text()
+            : new TextDecoder().decode(raw as ArrayBuffer);
         const meta = JSON.parse(text) as {
           version?: string;
           bytes?: number;
@@ -63,24 +67,32 @@ export const urlDescargaInstaladorAgente = createServerFn({ method: "POST" })
     await asegurarAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    let version = "latest";
+    let version = "1.0.0";
     const metaRes = await supabaseAdmin.storage.from(BUCKET).download(META_PATH);
     if (metaRes.data && !metaRes.error) {
       try {
-        const meta = JSON.parse(await metaRes.data.text()) as { version?: string };
+        const raw = metaRes.data;
+        const text =
+          typeof (raw as Blob).text === "function"
+            ? await (raw as Blob).text()
+            : new TextDecoder().decode(raw as ArrayBuffer);
+        const meta = JSON.parse(text) as { version?: string };
         if (meta.version) version = meta.version;
       } catch {
         /* ignore */
       }
     }
 
-    const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(PATH, 60 * 30);
+    const fileName = `DigitalizadorAgent-Setup-v${version}.zip`;
+    const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(PATH, 60 * 30, {
+      download: fileName,
+    });
     if (error || !data?.signedUrl) {
       throw new Error(error?.message ?? "No hay instalador publicado todavía.");
     }
     return {
       url: data.signedUrl,
-      nombre: `DigitalizadorAgent-Setup-v${version}.zip`,
+      nombre: fileName,
       version,
     };
   });
