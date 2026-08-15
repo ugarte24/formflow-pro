@@ -4,6 +4,14 @@ import { useRef, useState } from "react";
 import { Download, Loader2, Monitor, Plus, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
 import {
@@ -42,6 +50,7 @@ function Admin() {
   const [descargando, setDescargando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
   const [creandoUsuario, setCreandoUsuario] = useState(false);
+  const [modalUsuario, setModalUsuario] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
   const [nuevoEmail, setNuevoEmail] = useState("");
   const [nuevoPassword, setNuevoPassword] = useState("");
@@ -138,6 +147,14 @@ function Admin() {
     queryClient.invalidateQueries({ queryKey: ["operadores"] });
   }
 
+  function resetFormUsuario() {
+    setNuevoNombre("");
+    setNuevoEmail("");
+    setNuevoPassword("");
+    setNuevoTelefono("");
+    setNuevoRol("operador");
+  }
+
   async function crearUsuario() {
     setCreandoUsuario(true);
     try {
@@ -150,11 +167,8 @@ function Admin() {
           rol: nuevoRol,
         },
       });
-      setNuevoNombre("");
-      setNuevoEmail("");
-      setNuevoPassword("");
-      setNuevoTelefono("");
-      setNuevoRol("operador");
+      resetFormUsuario();
+      setModalUsuario(false);
       toast.success(
         creado.rol === "admin"
           ? `Administrador creado: ${creado.email}`
@@ -344,76 +358,26 @@ function Admin() {
         )}
       </section>
 
-      <section className="panel mt-4 p-4">
-        <p className="label-caps flex items-center gap-1.5">
-          <UserPlus className="h-3.5 w-3.5" /> Crear usuario
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Solo quienes tengan usuario creado aquí pueden entrar a la app. Elegí rol{" "}
-          <strong>Operador</strong> (escanea y envía) o <strong>Administrador</strong> (también gestiona el sistema).
-        </p>
-        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-          <input
-            value={nuevoNombre}
-            onChange={(e) => setNuevoNombre(e.target.value)}
-            maxLength={120}
-            placeholder="Nombre completo"
-            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary sm:col-span-2"
-          />
-          <input
-            value={nuevoEmail}
-            onChange={(e) => setNuevoEmail(e.target.value)}
-            type="email"
-            maxLength={255}
-            placeholder="Correo (para iniciar sesión)"
-            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
-          />
-          <input
-            value={nuevoPassword}
-            onChange={(e) => setNuevoPassword(e.target.value)}
-            type="password"
-            maxLength={72}
-            placeholder="Contraseña (mín. 6)"
-            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
-          />
-          <input
-            value={nuevoTelefono}
-            onChange={(e) => setNuevoTelefono(e.target.value)}
-            maxLength={40}
-            placeholder="Teléfono (opcional)"
-            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
-          />
-          <select
-            value={nuevoRol}
-            onChange={(e) => setNuevoRol(e.target.value as RolUsuario)}
-            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
-          >
-            <option value="operador">Rol: Operador</option>
-            <option value="admin">Rol: Administrador</option>
-          </select>
-        </div>
-        <button
-          type="button"
-          disabled={creandoUsuario}
-          onClick={() => void crearUsuario()}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-        >
-          {creandoUsuario ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
-          Crear usuario
-        </button>
-      </section>
-
       <section className="panel mt-4 overflow-hidden">
-        <p className="label-caps flex items-center gap-1.5 border-b border-border px-4 py-3">
-          <Users className="h-3.5 w-3.5" /> Usuarios
-        </p>
+        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+          <p className="label-caps flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" /> Usuarios
+          </p>
+          <button
+            type="button"
+            onClick={() => setModalUsuario(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-primary-foreground"
+          >
+            <UserPlus className="h-3.5 w-3.5" /> Crear usuario
+          </button>
+        </div>
         <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          Activá/desactivá el acceso o cambiá el rol. Sin usuario activo no pueden usar el aplicativo.
+          Solo quienes tengan usuario activo pueden usar la app. Activá/desactivá el acceso o cambiá el rol.
         </p>
         <ul className="divide-y divide-border">
           {(operadores ?? []).length === 0 ? (
             <li className="px-4 py-8 text-center text-sm text-muted-foreground">
-              Todavía no hay usuarios. Creá el primero arriba.
+              Todavía no hay usuarios. Pulsá «Crear usuario».
             </li>
           ) : (
             operadores?.map((o) => (
@@ -443,6 +407,86 @@ function Admin() {
           )}
         </ul>
       </section>
+
+      <Dialog
+        open={modalUsuario}
+        onOpenChange={(open) => {
+          if (creandoUsuario) return;
+          setModalUsuario(open);
+          if (!open) resetFormUsuario();
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Crear usuario</DialogTitle>
+            <DialogDescription>
+              Elegí rol <strong>Operador</strong> (escanea y envía) o <strong>Administrador</strong>{" "}
+              (también gestiona el sistema).
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-2.5">
+            <input
+              value={nuevoNombre}
+              onChange={(e) => setNuevoNombre(e.target.value)}
+              maxLength={120}
+              placeholder="Nombre completo"
+              className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <input
+              value={nuevoEmail}
+              onChange={(e) => setNuevoEmail(e.target.value)}
+              type="email"
+              maxLength={255}
+              placeholder="Correo (para iniciar sesión)"
+              className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <input
+              value={nuevoPassword}
+              onChange={(e) => setNuevoPassword(e.target.value)}
+              type="password"
+              maxLength={72}
+              placeholder="Contraseña (mín. 6)"
+              className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <input
+              value={nuevoTelefono}
+              onChange={(e) => setNuevoTelefono(e.target.value)}
+              maxLength={40}
+              placeholder="Teléfono (opcional)"
+              className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            />
+            <select
+              value={nuevoRol}
+              onChange={(e) => setNuevoRol(e.target.value as RolUsuario)}
+              className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+            >
+              <option value="operador">Rol: Operador</option>
+              <option value="admin">Rol: Administrador</option>
+            </select>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <button
+              type="button"
+              disabled={creandoUsuario}
+              onClick={() => setModalUsuario(false)}
+              className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={creandoUsuario}
+              onClick={() => void crearUsuario()}
+              className="flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              {creandoUsuario ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+              Crear
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
