@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, Monitor } from "lucide-react";
+import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, Monitor, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
@@ -68,8 +68,21 @@ function Verificar() {
   const meta = doc ? STATUS_META[doc.status as DocStatus] : null;
   const bloqueado = !!doc && ["confirmado", "enviado_pc", "formulario_completado", "registrado"].includes(doc.status);
 
+  const { data: fotoUrl } = useQuery({
+    queryKey: ["foto-url", doc?.foto_path],
+    enabled: !!doc?.foto_path,
+    queryFn: async () => {
+      const { data } = await supabase.storage.from("documentos").createSignedUrl(doc!.foto_path!, 3600);
+      return data?.signedUrl ?? null;
+    },
+  });
+
   async function confirmar() {
     if (!doc || !sesion) return;
+    if (!doc.foto_path) {
+      toast.error("Falta la fotografía del contribuyente. Vuelva a escanear.");
+      return;
+    }
     const faltantes = CAMPOS.filter((c) => !valores[c.key]?.trim()).map((c) => c.label);
     if (faltantes.length > 0) {
       toast.error(`Complete los campos: ${faltantes.join(", ")}`);
@@ -138,6 +151,17 @@ function Verificar() {
         ) : null
       }
     >
+      {doc.error_message && !bloqueado ? (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="text-sm text-destructive">
+            <p className="font-semibold">Error del agente</p>
+            <p className="mt-0.5 text-xs opacity-90">{doc.error_message}</p>
+            <p className="mt-1 text-xs text-muted-foreground">Corrija si hace falta y vuelva a enviar al PC.</p>
+          </div>
+        </div>
+      ) : null}
+
       {bloqueado ? (
         <div className="panel mb-4 p-5">
           <p className="label-caps">Estado del envío</p>
@@ -150,7 +174,7 @@ function Verificar() {
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {doc.status === "formulario_completado"
-              ? "El agente dejó el formulario listo en Firefox. El guardado final lo realiza el operador en el computador."
+              ? "Revise el Reporte de Control de Datos con el contribuyente y luego pulse Grabar en RUAT. El agente no guardó el trámite."
               : "El agente de escritorio recibirá los datos y completará el formulario en Firefox."}
           </p>
           {doc.error_message ? (
@@ -168,6 +192,26 @@ function Verificar() {
           </p>
         </div>
       ) : null}
+
+      <section className="panel mb-4 overflow-hidden">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <p className="label-caps flex items-center gap-1.5">
+            <UserRound className="h-3.5 w-3.5" /> Fotografía para RUAT
+          </p>
+          {doc.foto_path ? (
+            <span className="text-[11px] font-medium text-success">Lista (≤ 90 KB)</span>
+          ) : (
+            <span className="text-[11px] font-medium text-destructive">Falta captura</span>
+          )}
+        </div>
+        {fotoUrl ? (
+          <img src={fotoUrl} alt="Fotografía del contribuyente" className="mx-auto max-h-48 object-contain py-3" />
+        ) : (
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+            No hay fotografía. Use «Volver a escanear» para capturar CI + foto.
+          </p>
+        )}
+      </section>
 
       <section className="panel divide-y divide-border">
         {CAMPOS.map((campo) => {

@@ -1,3 +1,6 @@
+-- Extensiones requeridas (gen_random_uuid / gen_random_bytes)
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 -- ROLES
 CREATE TYPE public.app_role AS ENUM ('admin', 'operador');
 
@@ -54,7 +57,7 @@ CREATE TABLE public.computers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   nombre text NOT NULL,
   codigo text NOT NULL UNIQUE,
-  agent_token text NOT NULL DEFAULT encode(gen_random_bytes(24), 'hex'),
+  agent_token text NOT NULL DEFAULT encode(extensions.gen_random_bytes(24), 'hex'),
   activo boolean NOT NULL DEFAULT true,
   last_seen_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),

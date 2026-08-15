@@ -31,6 +31,9 @@ agent/.venv/
 agent/.env
 agent/downloads/
 
+# Supabase CLI local
+supabase/.temp/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
@@ -45,3 +48,5 @@ agent/downloads/
 *.njsproj
 *.sln
 *.sw?
+.vercel
+# No volver a poner `.env*` aquí: anularía las excepciones !.env.example de arriba.

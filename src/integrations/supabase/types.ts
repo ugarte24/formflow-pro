@@ -63,6 +63,7 @@ export type Database = {
           genero: string | null
           id: string
           image_path: string | null
+          foto_path: string | null
           nombres: string | null
           numero_documento: string | null
           numero_puerta: string | null
@@ -87,6 +88,7 @@ export type Database = {
           genero?: string | null
           id?: string
           image_path?: string | null
+          foto_path?: string | null
           nombres?: string | null
           numero_documento?: string | null
           numero_puerta?: string | null
@@ -111,6 +113,7 @@ export type Database = {
           genero?: string | null
           id?: string
           image_path?: string | null
+          foto_path?: string | null
           nombres?: string | null
           numero_documento?: string | null
           numero_puerta?: string | null

@@ -1,0 +1,170 @@
+{
+  "_comentario": "Calibrado parcialmente — Riberalta Contribuyentes v6.44.123. Ver CALIBRACION.md",
+  "contribuyente_natural": {
+    "link_role": "link",
+    "link_name": "^Contribuyente Natural$"
+  },
+  "registro_contribuyente_natural": {
+    "link_role": "link",
+    "link_name": "^Registro Contribuyente Natural$"
+  },
+  "buscar": {
+    "titulo": "REGISTRO CONTRIBUYENTE NATURAL - BUSCAR CONTRIBUYENTE",
+    "label_documento": "Número Documento",
+    "input_documento": "input[type='text']",
+    "input_documento_index": 0,
+    "input_complemento_index": 1,
+    "completar_complemento": false,
+    "label_tipo_documento": "Tipo Documento",
+    "tipo_documento_label": "CEDULA DE IDENTIDAD",
+    "label_departamento": "Departamento Expedido",
+    "departamento_expedido": "",
+    "boton_buscar": "^Buscar$",
+    "boton_nuevo": "^Nuevo Contribuyente$",
+    "municipio_local": "RIBERALTA",
+    "no_usar": ["Búsqueda Avanzada"]
+  },
+  "asociar": {
+    "link_name": "^Asociar$",
+    "no_marcar_foto": true,
+    "criterio": "nombre_mas_parecido",
+    "nota": "Otros municipios: Asociar sin marcar Imagen; elegir Nombre Completo más parecido al CI. Si Gobierno Municipal = RIBERALTA → solo avisar."
+  },
+  "ya_registrado": {
+    "municipio": "RIBERALTA",
+    "accion": "detener_y_avisar",
+    "mensaje": "El contribuyente ya tiene un registro en Riberalta. No se inició un nuevo alta."
+  },
+  "recepcion": {
+    "titulo": "INICIO TRAMITE RECEPCIONAR DOCUMENTACION",
+    "check_documento": "DOCUMENTO DE IDENTIDAD",
+    "no_marcar": ["PODER", "FACTURA LUZ/AGUA"],
+    "no_usar_tramitador": true,
+    "boton_grabar": "^Grabar$",
+    "no_usar": ["Limpiar", "Registrar"]
+  },
+  "datos_generales": {
+    "titulo": "DATOS GENERALES",
+    "nombres": "Nombre\\(s\\)|Nombres",
+    "primer_apellido": "Primer Apellido",
+    "segundo_apellido": "Segundo Apellido",
+    "apellido_esposo": "Apellido Esposo",
+    "llenar_apellido_esposo": false,
+    "genero_masculino": "MASCULINO",
+    "genero_femenino": "FEMENINO",
+    "estado_civil": "Estado Civil",
+    "estado_civil_map": {
+      "SOLTERO": "SOLTERO(A)",
+      "CASADO": "CASADO(A)",
+      "DIVORCIADO": "DIVORCIADO(A)",
+      "VIUDO": "VIUDO(A)",
+      "SOLTERO(A)": "SOLTERO(A)",
+      "CASADO(A)": "CASADO(A)"
+    },
+    "fecha_nacimiento": "Fecha Nacimiento",
+    "fecha_formato": "DD/MM/AAAA",
+    "departamento_expedido": "",
+    "no_editar": ["Número Documento", "Tipo Documento", "Número Trámite"],
+    "boton_aceptar": "^Aceptar$",
+    "no_usar": ["Limpiar", "Cancelar Trámite"]
+  },
+  "domicilio": {
+    "titulo": "DOMICILIO LEGAL",
+    "busqueda_avanzada": {
+      "link_name": "Búsqueda Avanzada",
+      "obligatorio": true
+    },
+    "busqueda_avanzada_form": {
+      "titulo": "BUSQUEDA AVANZADA DIRECCION",
+      "area_default": "URBANO",
+      "tipo_lugar": "AVENIDA",
+      "label_tipo_lugar": "Tipo Lugar",
+      "label_nombre_lugar": "Nombre Lugar",
+      "boton_buscar": "^Buscar$",
+      "resultados_columnas": ["Distrito/Comunidad", "Barrio", "Tipo Lugar", "Nombre Lugar", "Asociar"],
+      "link_asociar": "^Asociar$",
+      "fallback_nombre": "SIN NOMINAR",
+      "asociar_barrio": "BARRIO SIN NOMINAR",
+      "asociar_avenida": "AVENIDA SIN NOMINAR",
+      "link_anterior": "^Anterior$",
+      "link_nueva_busqueda": "Nueva Búsqueda"
+    },
+    "area_municipio": {
+      "label": "Área Municipio",
+      "default": "URBANO",
+      "opciones": ["URBANO", "RURAL"]
+    },
+    "distrito": "Distrito/Comunidad",
+    "barrio": "Barrio",
+    "tipo_lugar": "Tipo Lugar",
+    "nombre_lugar": "Nombre Lugar",
+    "numero_puerta": "Número Puerta",
+    "sin_numero": "Sin Número",
+    "direccion_descriptiva": "Dirección Descriptiva",
+    "llenar_direccion_descriptiva": false,
+    "llenar_edificio": false,
+    "edificio": {
+      "check": "Edificio",
+      "nombre": "Nombre Edificio",
+      "bloque": "Bloque",
+      "piso": "Piso",
+      "departamento": "Departamento"
+    },
+    "boton_aceptar": "^Aceptar$",
+    "no_usar": ["Limpiar", "Cancelar Trámite", "Búsqueda Avanzada"]
+  },
+  "apoderado": {
+    "mensaje": "¿Desea registrar un Apoderado/Representante Legal?",
+    "boton_aceptar": "^Aceptar$",
+    "boton_cancelar": "^Cancelar$",
+    "accion": "cancelar"
+  },
+  "info_adicional": {
+    "titulo": "INFORMACION ADICIONAL",
+    "celular": "Teléfono Celular|Telefono Celular",
+    "no_llenar": [
+      "Teléfono Domicilio",
+      "Teléfono Oficina",
+      "Correo Electrónico",
+      "Casilla Correo",
+      "Página Web"
+    ],
+    "boton_aceptar": "^Aceptar$",
+    "no_usar": ["Limpiar", "Cancelar Trámite", "Anterior"]
+  },
+  "imagenes": {
+    "titulo": "REGISTRAR IMAGENES",
+    "fotografia": {
+      "label": "Fotografía",
+      "max_kb": 90,
+      "boton_examinar": "Examinar",
+      "input_file_index": 0
+    },
+    "editar_fotografia": {
+      "titulo": "EDITAR FOTOGRAFÍA",
+      "boton_procesar": "^Procesar$",
+      "boton_rotar": "^Rotar$",
+      "boton_finalizar": "^Finalizar$",
+      "usar_recorte_default": true,
+      "nota": "Ajustar cuadro remarcado al rostro/hombros; luego Procesar. MVP: Procesar con recorte por defecto si ya enmarca al contribuyente."
+    },
+    "no_subir": ["Documento Identidad Anverso", "Documento Identidad Reverso"],
+    "observaciones_en_blanco": true,
+    "input_file": "input[type='file']",
+    "boton_aceptar": "^Aceptar$",
+    "no_usar": ["Limpiar", "Cancelar Trámite"]
+  },
+  "confirmar_tramite": {
+    "titulo": "CONFIRMAR TRAMITE",
+    "pasos_finales": true,
+    "boton_imprimir": "^Imprimir Reporte$",
+    "boton_grabar": "^Grabar$",
+    "boton_salir": "^Salir$",
+    "accion_agente": "imprimir_reporte",
+    "grabar_automatico": false,
+    "grabar_automatico_fase2": true,
+    "mensaje_operador": "Revise el Reporte de Control de Datos con el contribuyente y luego pulse Grabar en RUAT. El agente no guardó el trámite.",
+    "no_usar": ["Grabar", "Salir", "Cancelar Trámite"],
+    "modo_seguro": "MVP: operador verifica el reporte y pulsa Grabar. Fase 2: GRABAR_AUTOMATICO=1"
+  }
+}

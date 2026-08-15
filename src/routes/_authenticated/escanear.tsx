@@ -1,26 +1,31 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { AlertTriangle, Camera, Check, Loader2, RefreshCw, Sun, Focus } from "lucide-react";
+import { AlertTriangle, Camera, Check, Loader2, RefreshCw, Sun, Focus, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
 import { extraerDatosDocumento } from "@/lib/ocr.functions";
+import { canvasToJpegUnderLimit } from "@/lib/image-compress";
 import { useSesion } from "@/hooks/useSesion";
 
 export const Route = createFileRoute("/_authenticated/escanear")({
   head: () => ({
     meta: [
       { title: "Escanear documento — Digitalizador" },
-      { name: "description", content: "Captura guiada del documento de identidad con control de nitidez e iluminación." },
+      {
+        name: "description",
+        content: "Captura el documento de identidad y la fotografía del contribuyente.",
+      },
       { property: "og:title", content: "Escanear documento — Digitalizador" },
-      { property: "og:description", content: "Captura el documento y extrae los datos automáticamente." },
+      { property: "og:description", content: "Captura el CI y la foto para el registro RUAT." },
     ],
   }),
   component: Escanear,
 });
 
 type Calidad = { nitidez: number; luz: number; ok: boolean };
+type Fase = "ci" | "foto";
 
 function Escanear() {
   const router = useRouter();
@@ -31,6 +36,8 @@ function Escanear() {
   const streamRef = useRef<MediaStream | null>(null);
   const autoRef = useRef(0);
 
+  const [fase, setFase] = useState<Fase>("ci");
+  const [docId, setDocId] = useState<string | null>(null);
   const [estado, setEstado] = useState<"iniciando" | "listo" | "procesando" | "error">("iniciando");
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [calidad, setCalidad] = useState<Calidad>({ nitidez: 0, luz: 0, ok: false });
@@ -42,18 +49,15 @@ function Escanear() {
     streamRef.current = null;
   }, []);
 
-  useEffect(() => {
-    let cancelado = false;
-    async function iniciar() {
+  const iniciarCamara = useCallback(
+    async (facing: "environment" | "user") => {
+      detener();
+      setEstado("iniciando");
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
+          video: { facingMode: { ideal: facing }, width: { ideal: 1920 } },
           audio: false,
         });
-        if (cancelado) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -64,13 +68,14 @@ function Escanear() {
         setEstado("error");
         setMensaje("No se pudo acceder a la cámara. Revise los permisos del navegador.");
       }
-    }
-    iniciar();
-    return () => {
-      cancelado = true;
-      detener();
-    };
-  }, [detener]);
+    },
+    [detener],
+  );
+
+  useEffect(() => {
+    void iniciarCamara(fase === "ci" ? "environment" : "user");
+    return () => detener();
+  }, [fase, iniciarCamara, detener]);
 
   const medirCalidad = useCallback(() => {
     const video = videoRef.current;
@@ -108,7 +113,7 @@ function Escanear() {
   }, []);
 
   useEffect(() => {
-    if (estado !== "listo") return;
+    if (estado !== "listo" || fase !== "ci") return;
     const id = window.setInterval(() => {
       const ok = medirCalidad();
       if (ok && autoCaptura) {
@@ -123,30 +128,35 @@ function Escanear() {
     }, 450);
     return () => window.clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, autoCaptura, medirCalidad]);
+  }, [estado, autoCaptura, medirCalidad, fase]);
 
-  async function capturar() {
+  async function dibujarFrame(): Promise<HTMLCanvasElement> {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (!video || !canvas || !sesion || estado === "procesando") return;
+    if (!video || !canvas) throw new Error("Cámara no lista");
+    const ancho = Math.min(1600, video.videoWidth || 1280);
+    const alto = Math.round((ancho / (video.videoWidth || 1)) * (video.videoHeight || 720));
+    canvas.width = ancho;
+    canvas.height = alto;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("No se pudo procesar la imagen");
+    ctx.drawImage(video, 0, 0, ancho, alto);
+    return canvas;
+  }
 
+  async function capturarCi() {
+    if (!sesion || estado === "procesando") return;
     setEstado("procesando");
     setMensaje(null);
     try {
-      setPaso("Preparando imagen…");
-      const ancho = Math.min(1600, video.videoWidth);
-      const alto = Math.round((ancho / video.videoWidth) * video.videoHeight);
-      canvas.width = ancho;
-      canvas.height = alto;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("No se pudo procesar la imagen");
-      ctx.drawImage(video, 0, 0, ancho, alto);
+      setPaso("Preparando imagen del documento…");
+      const canvas = await dibujarFrame();
       const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
       const base64 = dataUrl.split(",")[1] ?? "";
       const blob = await (await fetch(dataUrl)).blob();
 
-      setPaso("Guardando captura…");
-      const nombre = `${sesion.userId}/${Date.now()}.jpg`;
+      setPaso("Guardando documento…");
+      const nombre = `${sesion.userId}/${Date.now()}-ci.jpg`;
       const { error: upErr } = await supabase.storage.from("documentos").upload(nombre, blob, {
         contentType: "image/jpeg",
       });
@@ -180,8 +190,11 @@ function Escanear() {
         detalle: `Calidad: ${resultado.calidadImagen} · ${resultado.processingMs} ms`,
       });
 
-      detener();
-      router.navigate({ to: "/verificar/$id", params: { id: doc.id } });
+      setDocId(doc.id);
+      setFase("foto");
+      setAutoCaptura(false);
+      autoRef.current = 0;
+      toast.success("Documento leído. Ahora capture la fotografía.");
     } catch (error) {
       setEstado("listo");
       const texto = error instanceof Error ? error.message : "No se pudo procesar la captura";
@@ -192,19 +205,79 @@ function Escanear() {
     }
   }
 
+  async function capturarFoto() {
+    if (!sesion || !docId || estado === "procesando") return;
+    setEstado("procesando");
+    setMensaje(null);
+    try {
+      setPaso("Comprimiendo fotografía (máx. 90 KB)…");
+      const canvas = await dibujarFrame();
+      const { blob, bytes } = await canvasToJpegUnderLimit(canvas, 90 * 1024);
+
+      setPaso("Guardando fotografía…");
+      const nombre = `${sesion.userId}/${Date.now()}-foto.jpg`;
+      const { error: upErr } = await supabase.storage.from("documentos").upload(nombre, blob, {
+        contentType: "image/jpeg",
+      });
+      if (upErr) throw upErr;
+
+      const { error: updErr } = await supabase
+        .from("documents")
+        .update({ foto_path: nombre })
+        .eq("id", docId);
+      if (updErr) throw updErr;
+
+      await supabase.from("operation_logs").insert({
+        document_id: docId,
+        operator_id: sesion.userId,
+        evento: "Fotografía capturada",
+        detalle: `${bytes} bytes`,
+      });
+
+      detener();
+      toast.success(`Fotografía lista (${Math.round(bytes / 1024)} KB)`);
+      router.navigate({ to: "/verificar/$id", params: { id: docId } });
+    } catch (error) {
+      setEstado("listo");
+      const texto = error instanceof Error ? error.message : "No se pudo guardar la fotografía";
+      setMensaje(texto);
+      toast.error(texto);
+    } finally {
+      setPaso("");
+    }
+  }
+
+  async function capturar() {
+    if (fase === "ci") await capturarCi();
+    else await capturarFoto();
+  }
+
+  const titulo = fase === "ci" ? "1/2 · Documento de identidad" : "2/2 · Fotografía";
+  const subtitulo =
+    fase === "ci"
+      ? "Coloque el documento dentro del marco"
+      : "Capture el rostro del contribuyente (se comprimirá a ≤ 90 KB)";
+
   return (
-    <AppShell titulo="Escanear documento" subtitulo="Coloque el documento dentro del marco" esAdmin={sesion?.esAdmin}>
+    <AppShell titulo={titulo} subtitulo={subtitulo} esAdmin={sesion?.esAdmin}>
+      <div className="mb-3 flex gap-2">
+        <PasoChip activo={fase === "ci"} hecho={fase === "foto"} label="CI" />
+        <PasoChip activo={fase === "foto"} hecho={false} label="Foto" />
+      </div>
+
       <div className="ink-panel relative overflow-hidden">
         <video
           ref={videoRef}
           playsInline
           muted
-          className="aspect-[3/4] w-full object-cover sm:aspect-[4/3]"
+          className={`w-full object-cover ${fase === "ci" ? "aspect-[3/4] sm:aspect-[4/3]" : "aspect-square"}`}
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
           <div
-            className={`h-[58%] w-full rounded-xl border-2 border-dashed transition-colors ${
-              calidad.ok ? "border-success" : "border-primary-foreground/40"
+            className={`border-2 border-dashed transition-colors ${
+              fase === "ci"
+                ? `h-[58%] w-full rounded-xl ${calidad.ok ? "border-success" : "border-primary-foreground/40"}`
+                : "h-[70%] w-[70%] rounded-full border-primary-foreground/50"
             }`}
           />
         </div>
@@ -219,31 +292,39 @@ function Escanear() {
       <canvas ref={canvasRef} className="hidden" />
 
       <div className="panel mt-4 p-4">
-        <p className="label-caps">Validaciones en vivo</p>
-        <div className="mt-3 space-y-2.5">
-          <Chequeo
-            icono={<Focus className="h-4 w-4" />}
-            label="Imagen nítida"
-            ok={calidad.nitidez > 0.3}
-            valor={calidad.nitidez}
-          />
-          <Chequeo
-            icono={<Sun className="h-4 w-4" />}
-            label="Iluminación suficiente"
-            ok={calidad.luz > 0.25 && calidad.luz < 0.92}
-            valor={calidad.luz}
-          />
-        </div>
+        {fase === "ci" ? (
+          <>
+            <p className="label-caps">Validaciones en vivo</p>
+            <div className="mt-3 space-y-2.5">
+              <Chequeo
+                icono={<Focus className="h-4 w-4" />}
+                label="Imagen nítida"
+                ok={calidad.nitidez > 0.3}
+                valor={calidad.nitidez}
+              />
+              <Chequeo
+                icono={<Sun className="h-4 w-4" />}
+                label="Iluminación suficiente"
+                ok={calidad.luz > 0.25 && calidad.luz < 0.92}
+                valor={calidad.luz}
+              />
+            </div>
 
-        <label className="mt-4 flex items-center justify-between rounded-xl border border-border bg-background px-3.5 py-3">
-          <span className="text-sm font-medium">Captura automática</span>
-          <input
-            type="checkbox"
-            checked={autoCaptura}
-            onChange={(e) => setAutoCaptura(e.target.checked)}
-            className="h-4 w-4 accent-primary"
-          />
-        </label>
+            <label className="mt-4 flex items-center justify-between rounded-xl border border-border bg-background px-3.5 py-3">
+              <span className="text-sm font-medium">Captura automática</span>
+              <input
+                type="checkbox"
+                checked={autoCaptura}
+                onChange={(e) => setAutoCaptura(e.target.checked)}
+                className="h-4 w-4 accent-primary"
+              />
+            </label>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Encuadre el rostro en el círculo. La foto se comprimirá automáticamente para RUAT (máximo 90 KB).
+          </p>
+        )}
 
         {mensaje ? (
           <p className="mt-3 flex items-start gap-2 rounded-xl bg-warning/20 px-3 py-2.5 text-xs text-warning-foreground">
@@ -258,7 +339,8 @@ function Escanear() {
             disabled={estado !== "listo"}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
           >
-            <Camera className="h-4 w-4" /> Capturar ahora
+            {fase === "ci" ? <Camera className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+            {fase === "ci" ? "Capturar documento" : "Capturar fotografía"}
           </button>
           <button
             onClick={() => router.navigate({ to: "/inicio" })}
@@ -269,6 +351,22 @@ function Escanear() {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+function PasoChip({ activo, hecho, label }: { activo: boolean; hecho: boolean; label: string }) {
+  return (
+    <span
+      className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+        activo
+          ? "bg-primary text-primary-foreground"
+          : hecho
+            ? "bg-success/15 text-success"
+            : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {label}
+    </span>
   );
 }
 
