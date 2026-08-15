@@ -247,103 +247,83 @@ function Escanear() {
 
   return (
     <AppShell titulo={titulo} subtitulo={subtitulo} esAdmin={sesion?.esAdmin}>
-      <div className="mb-3 flex gap-2">
-        <PasoChip activo={fase === "ci"} hecho={fase === "foto"} label="CI" />
-        <PasoChip activo={fase === "foto"} hecho={false} label="Foto" />
-      </div>
-
-      <div className="ink-panel relative overflow-hidden">
-        <video
-          ref={videoRef}
-          playsInline
-          muted
-          className={`w-full object-cover ${fase === "ci" ? "aspect-[3/4] sm:aspect-[4/3]" : "aspect-square"}`}
-        />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
-          <div
-            className={`border-2 border-dashed transition-colors ${
-              fase === "ci"
-                ? `h-[58%] w-full rounded-xl ${calidad.ok ? "border-success" : "border-primary-foreground/40"}`
-                : "h-[70%] w-[70%] rounded-full border-primary-foreground/50"
-            }`}
+      {/* Altura fija (no solo max-h) para que flex-1 agrande la cámara */}
+      <div className="-mt-1 flex h-[calc(100dvh-8.75rem)] flex-col gap-2 overflow-hidden pb-1">
+        <div className="ink-panel relative min-h-0 w-full flex-1 overflow-hidden">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            autoPlay
+            className="absolute inset-0 h-full w-full object-cover"
           />
-        </div>
-
-        {estado === "procesando" ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/80 text-center">
-            <Loader2 className="h-7 w-7 animate-spin text-primary-foreground" />
-            <p className="text-sm font-medium text-primary-foreground">{paso || "Procesando…"}</p>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 sm:p-5">
+            <div
+              className={`border-2 border-dashed transition-colors ${
+                fase === "ci"
+                  ? `h-[78%] w-[90%] max-w-lg rounded-xl ${calidad.ok ? "border-success" : "border-primary-foreground/40"}`
+                  : "h-[70%] w-[70%] max-w-[320px] rounded-full border-primary-foreground/50"
+              }`}
+            />
           </div>
-        ) : null}
-      </div>
-      <canvas ref={canvasRef} className="hidden" />
 
-      <div className="panel mt-4 p-4">
-        {fase === "ci" ? (
-          <>
-            <p className="label-caps">Validaciones en vivo</p>
-            <div className="mt-3 space-y-2.5">
+          {estado === "procesando" ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/80 text-center">
+              <Loader2 className="h-7 w-7 animate-spin text-primary-foreground" />
+              <p className="text-sm font-medium text-primary-foreground">{paso || "Procesando…"}</p>
+            </div>
+          ) : null}
+        </div>
+        <canvas ref={canvasRef} className="hidden" />
+
+        <div className="panel shrink-0 p-3">
+          {fase === "ci" ? (
+            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1.5">
               <Chequeo
-                icono={<Focus className="h-4 w-4" />}
-                label="Imagen nítida"
+                icono={<Focus className="h-3.5 w-3.5" />}
+                label="Nítida"
                 ok={calidad.nitidez > 0.3}
                 valor={calidad.nitidez}
               />
               <Chequeo
-                icono={<Sun className="h-4 w-4" />}
-                label="Iluminación suficiente"
+                icono={<Sun className="h-3.5 w-3.5" />}
+                label="Luz"
                 ok={calidad.luz > 0.25 && calidad.luz < 0.92}
                 valor={calidad.luz}
               />
             </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Apunte la cámara trasera al rostro. La foto se comprimirá automáticamente para RUAT (máximo 90 KB).
-          </p>
-        )}
+          ) : (
+            <p className="mb-3 text-xs text-muted-foreground">
+              Cámara trasera al rostro · máx. 90 KB
+            </p>
+          )}
 
-        {mensaje ? (
-          <p className="mt-3 flex items-start gap-2 rounded-xl bg-warning/20 px-3 py-2.5 text-xs text-warning-foreground">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            {mensaje}
-          </p>
-        ) : null}
+          {mensaje ? (
+            <p className="mb-3 flex items-start gap-2 rounded-xl bg-warning/20 px-3 py-2 text-xs text-warning-foreground">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              {mensaje}
+            </p>
+          ) : null}
 
-        <div className="mt-4 flex gap-2">
-          <button
-            onClick={() => void capturar()}
-            disabled={estado !== "listo"}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
-          >
-            {fase === "ci" ? <Camera className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
-            {fase === "ci" ? "Capturar documento" : "Capturar fotografía"}
-          </button>
-          <button
-            onClick={() => router.navigate({ to: "/inicio" })}
-            className="rounded-xl border border-border px-4 py-3 text-sm font-medium"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => void capturar()}
+              disabled={estado !== "listo"}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {fase === "ci" ? <Camera className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
+              {fase === "ci" ? "Capturar documento" : "Capturar fotografía"}
+            </button>
+            <button
+              onClick={() => router.navigate({ to: "/inicio" })}
+              className="rounded-xl border border-border px-4 py-3 text-sm font-medium"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function PasoChip({ activo, hecho, label }: { activo: boolean; hecho: boolean; label: string }) {
-  return (
-    <span
-      className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-        activo
-          ? "bg-primary text-primary-foreground"
-          : hecho
-            ? "bg-success/15 text-success"
-            : "bg-muted text-muted-foreground"
-      }`}
-    >
-      {label}
-    </span>
   );
 }
 
@@ -359,10 +339,12 @@ function Chequeo({
   valor: number;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className={ok ? "text-success" : "text-muted-foreground"}>{ok ? <Check className="h-4 w-4" /> : icono}</span>
-      <span className="flex-1 text-sm">{label}</span>
-      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      <span className={ok ? "text-success" : "text-muted-foreground"}>
+        {ok ? <Check className="h-3.5 w-3.5" /> : icono}
+      </span>
+      <span className="shrink-0 text-xs">{label}</span>
+      <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
         <div
           className={`h-full rounded-full transition-all ${ok ? "bg-success" : "bg-warning"}`}
           style={{ width: `${Math.round(Math.min(1, valor) * 100)}%` }}
