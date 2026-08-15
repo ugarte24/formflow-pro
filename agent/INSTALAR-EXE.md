@@ -20,7 +20,8 @@ cd agent
 .\Publicar-Instalador.ps1
 ```
 
-También podés subir el ZIP desde Admin → **Publicar nueva versión**.
+También podés publicar con:
+.\Publicar-Instalador.ps1 -Version 1.1.0
 
 ## Actualizar en el PC del operador
 

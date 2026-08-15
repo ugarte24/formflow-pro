@@ -1,11 +1,29 @@
-# Publica DigitalizadorAgent-Setup.zip en Supabase Storage
+# Publica DigitalizadorAgent-Setup.zip + version.json en Supabase Storage
 # para que el administrador lo descargue desde la web (Admin).
 #
-# Uso (después de Crear-Paquete-Instalacion.ps1):
-#   .\Publicar-Instalador.ps1
+# Uso:
+#   .\Publicar-Instalador.ps1              # usa agent/VERSION
+#   .\Publicar-Instalador.ps1 -Version 1.1.0
+
+param(
+  [string]$Version = ""
+)
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+$versionFile = Join-Path $PSScriptRoot "VERSION"
+if (-not $Version) {
+  if (Test-Path $versionFile) {
+    $Version = (Get-Content $versionFile -Raw).Trim()
+  } else {
+    $Version = "1.0.0"
+  }
+}
+if ($Version -notmatch '^\d+\.\d+\.\d+') {
+  throw "Versión inválida: $Version (use formato X.Y.Z)"
+}
+Set-Content -Encoding ascii -NoNewline -Path $versionFile -Value $Version
 
 $zip = Join-Path $PSScriptRoot "dist\DigitalizadorAgent-Setup.zip"
 if (-not (Test-Path $zip)) {
@@ -17,7 +35,6 @@ $root = Split-Path $PSScriptRoot -Parent
 $envFile = Join-Path $root ".env"
 if (-not (Test-Path $envFile)) { throw "Falta $envFile con SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY" }
 
-# Cargar .env simple
 Get-Content $envFile | ForEach-Object {
   if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
   $p = $_.Split('=', 2)
@@ -32,22 +49,40 @@ $url = $env:SUPABASE_URL
 $key = $env:SUPABASE_SERVICE_ROLE_KEY
 if (-not $url -or -not $key) { throw "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY incompletos en .env" }
 
-$objectPath = "releases/DigitalizadorAgent-Setup.zip"
-$endpoint = "$($url.TrimEnd('/'))/storage/v1/object/agente/$objectPath"
-
-Write-Host "Subiendo instalador a Storage (agente/$objectPath)…" -ForegroundColor Cyan
-$bytes = [System.IO.File]::ReadAllBytes($zip)
-$headers = @{
+$base = $url.TrimEnd('/')
+$headersZip = @{
   "Authorization" = "Bearer $key"
   "apikey" = $key
   "Content-Type" = "application/zip"
   "x-upsert" = "true"
 }
 
-# Invoke-RestMethod con body binario
-Invoke-RestMethod -Method Post -Uri $endpoint -Headers $headers -Body $bytes | Out-Null
+$zipPath = "releases/DigitalizadorAgent-Setup.zip"
+$metaPath = "releases/version.json"
+$zipBytes = [System.IO.File]::ReadAllBytes($zip)
+$size = (Get-Item $zip).Length
+$publicado = (Get-Date).ToUniversalTime().ToString("o")
 
-$sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+$meta = @{
+  version = $Version
+  archivo = "DigitalizadorAgent-Setup.zip"
+  bytes = $size
+  publicado_at = $publicado
+} | ConvertTo-Json -Compress
+
+Write-Host "Subiendo instalador v$Version…" -ForegroundColor Cyan
+Invoke-RestMethod -Method Post -Uri "$base/storage/v1/object/agente/$zipPath" -Headers $headersZip -Body $zipBytes | Out-Null
+
+# Algunos buckets restringen MIME: subir meta como octet-stream también funciona
+$headersMeta = @{
+  "Authorization" = "Bearer $key"
+  "apikey" = $key
+  "Content-Type" = "application/octet-stream"
+  "x-upsert" = "true"
+}
+Invoke-RestMethod -Method Post -Uri "$base/storage/v1/object/agente/$metaPath" -Headers $headersMeta -Body ([System.Text.Encoding]::UTF8.GetBytes($meta)) | Out-Null
+
+$sizeMb = [math]::Round($size / 1MB, 1)
 Write-Host ""
-Write-Host "Publicado ($sizeMb MB)." -ForegroundColor Green
-Write-Host "El administrador lo descarga en: Admin → Instalador PC operador"
+Write-Host "Publicado v$Version ($sizeMb MB)." -ForegroundColor Green
+Write-Host "Admin → Instalador PC operador → Descargar"

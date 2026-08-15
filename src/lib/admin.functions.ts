@@ -3,6 +3,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 const BUCKET = "agente";
 const PATH = "releases/DigitalizadorAgent-Setup.zip";
+const META_PATH = "releases/version.json";
 
 async function asegurarAdmin(supabase: any, userId: string) {
   const { data } = await supabase.rpc("has_role", { _user_id: userId, _role: "admin" });
@@ -14,19 +15,45 @@ export const estadoInstaladorAgente = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await asegurarAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data, error } = await supabaseAdmin.storage.from(BUCKET).list("releases", {
-      search: "DigitalizadorAgent-Setup.zip",
-      limit: 5,
-    });
+
+    const [{ data: files, error }, metaRes] = await Promise.all([
+      supabaseAdmin.storage.from(BUCKET).list("releases", {
+        search: "DigitalizadorAgent-Setup.zip",
+        limit: 5,
+      }),
+      supabaseAdmin.storage.from(BUCKET).download(META_PATH),
+    ]);
     if (error) throw new Error(error.message);
-    const file = (data ?? []).find((f) => f.name === "DigitalizadorAgent-Setup.zip");
+
+    const file = (files ?? []).find((f) => f.name === "DigitalizadorAgent-Setup.zip");
     if (!file) return { disponible: false as const };
+
+    let version: string | null = null;
+    let publicado: string | null = file.updated_at ?? file.created_at ?? null;
+    let bytes: number | null = file.metadata?.size ?? null;
+
+    if (metaRes.data && !metaRes.error) {
+      try {
+        const text = await metaRes.data.text();
+        const meta = JSON.parse(text) as {
+          version?: string;
+          bytes?: number;
+          publicado_at?: string;
+        };
+        version = meta.version ?? null;
+        if (typeof meta.bytes === "number") bytes = meta.bytes;
+        if (meta.publicado_at) publicado = meta.publicado_at;
+      } catch {
+        /* ignore meta parse */
+      }
+    }
 
     return {
       disponible: true as const,
       nombre: file.name,
-      bytes: file.metadata?.size ?? null,
-      actualizado: file.updated_at ?? file.created_at ?? null,
+      version,
+      bytes,
+      actualizado: publicado,
     };
   });
 
@@ -35,14 +62,27 @@ export const urlDescargaInstaladorAgente = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     await asegurarAdmin(context.supabase, context.userId);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    let version = "latest";
+    const metaRes = await supabaseAdmin.storage.from(BUCKET).download(META_PATH);
+    if (metaRes.data && !metaRes.error) {
+      try {
+        const meta = JSON.parse(await metaRes.data.text()) as { version?: string };
+        if (meta.version) version = meta.version;
+      } catch {
+        /* ignore */
+      }
+    }
+
     const { data, error } = await supabaseAdmin.storage.from(BUCKET).createSignedUrl(PATH, 60 * 30);
     if (error || !data?.signedUrl) {
-      throw new Error(
-        error?.message ??
-          "No hay instalador publicado. Subí el ZIP desde Admin o con el script de publicación.",
-      );
+      throw new Error(error?.message ?? "No hay instalador publicado todavía.");
     }
-    return { url: data.signedUrl, nombre: "DigitalizadorAgent-Setup.zip" };
+    return {
+      url: data.signedUrl,
+      nombre: `DigitalizadorAgent-Setup-v${version}.zip`,
+      version,
+    };
   });
 
 export type RolUsuario = "operador" | "admin";

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { Download, Loader2, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
+import { useState } from "react";
+import { Download, Loader2, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -46,7 +46,6 @@ function Admin() {
   const { data: sesion } = useSesion();
   const queryClient = useQueryClient();
   const [descargando, setDescargando] = useState(false);
-  const [subiendo, setSubiendo] = useState(false);
   const [creandoUsuario, setCreandoUsuario] = useState(false);
   const [modalUsuario, setModalUsuario] = useState(false);
   const [nuevoNombre, setNuevoNombre] = useState("");
@@ -54,7 +53,6 @@ function Admin() {
   const [nuevoPassword, setNuevoPassword] = useState("");
   const [nuevoTelefono, setNuevoTelefono] = useState("");
   const [nuevoRol, setNuevoRol] = useState<RolUsuario>("operador");
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: operadores } = useQuery({
     queryKey: ["operadores"],
@@ -160,32 +158,6 @@ function Admin() {
     }
   }
 
-  async function subirInstalador(file: File) {
-    if (!file.name.toLowerCase().endsWith(".zip")) {
-      toast.error("Subí el archivo DigitalizadorAgent-Setup.zip");
-      return;
-    }
-    if (file.size > 100 * 1024 * 1024) {
-      toast.error("El ZIP supera 100 MB");
-      return;
-    }
-    setSubiendo(true);
-    try {
-      const { error } = await supabase.storage.from("agente").upload("releases/DigitalizadorAgent-Setup.zip", file, {
-        upsert: true,
-        contentType: "application/zip",
-      });
-      if (error) throw error;
-      toast.success("Instalador publicado. Ya se puede descargar desde Admin.");
-      queryClient.invalidateQueries({ queryKey: ["instalador-agente"] });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "No se pudo subir el instalador");
-    } finally {
-      setSubiendo(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
   if (sesion && !sesion.esAdmin) {
     return (
       <AppShell titulo="Administración" esAdmin={false}>
@@ -196,62 +168,56 @@ function Admin() {
     );
   }
 
+  const versionLabel = instalador?.disponible
+    ? instalador.version
+      ? `v${instalador.version}`
+      : "versión sin número"
+    : null;
+
   return (
     <AppShell titulo="Administración" subtitulo="Usuarios e instalador" esAdmin={sesion?.esAdmin}>
       <section className="panel p-4">
-        <p className="label-caps flex items-center gap-1.5">
-          <Download className="h-3.5 w-3.5" /> Instalador PC operador
-        </p>
+        <div className="flex items-start justify-between gap-3">
+          <p className="label-caps flex items-center gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Instalador PC operador
+          </p>
+          {versionLabel ? (
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-primary">
+              {versionLabel}
+            </span>
+          ) : null}
+        </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Descargá el ZIP, pasáselo al operador. Él descomprime, ejecuta <strong>Instalar.bat</strong> y deja{" "}
-          <strong>CODIGO_PC=PC-DEFAULT</strong> (ya viene listo).
+          Descargá la última versión, pasásela al operador. Él descomprime, ejecuta{" "}
+          <strong>Instalar.bat</strong> y deja <strong>CODIGO_PC=PC-DEFAULT</strong>.
         </p>
 
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            disabled={descargando || cargandoInstalador || !instalador?.disponible}
-            onClick={() => void descargarInstalador()}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Descargar DigitalizadorAgent-Setup.zip
-          </button>
-          <button
-            type="button"
-            disabled={subiendo}
-            onClick={() => fileRef.current?.click()}
-            className="flex items-center justify-center gap-2 rounded-xl border border-border px-4 py-3 text-sm font-medium disabled:opacity-50"
-          >
-            {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Publicar nueva versión
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".zip,application/zip"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void subirInstalador(f);
-            }}
-          />
-        </div>
+        <button
+          type="button"
+          disabled={descargando || cargandoInstalador || !instalador?.disponible}
+          onClick={() => void descargarInstalador()}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+        >
+          {descargando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {instalador?.disponible && instalador.version
+            ? `Descargar instalador v${instalador.version}`
+            : "Descargar instalador"}
+        </button>
 
         <p className="mt-2 text-[11px] text-muted-foreground">
           {cargandoInstalador
             ? "Comprobando instalador…"
             : instalador?.disponible
               ? [
-                  "Versión publicada",
+                  versionLabel,
                   formatBytes(instalador.bytes),
                   instalador.actualizado
-                    ? `actualizada ${new Date(instalador.actualizado).toLocaleString("es-BO")}`
+                    ? `publicada ${new Date(instalador.actualizado).toLocaleString("es-BO")}`
                     : null,
                 ]
                   .filter(Boolean)
                   .join(" · ")
-              : "Aún no hay instalador. Usá «Publicar nueva versión» con el ZIP generado en desarrollo."}
+              : "Todavía no hay instalador publicado."}
         </p>
       </section>
 
