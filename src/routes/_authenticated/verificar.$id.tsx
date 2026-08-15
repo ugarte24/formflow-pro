@@ -1,11 +1,12 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Loader2, Send, X, RotateCcw, UserRound } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, Camera, Check, Loader2, Send, X, RotateCcw, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
+import { canvasToJpegUnderLimit } from "@/lib/image-compress";
 import { CAMPOS, STATUS_META, TONE_CLASS, confianzaTone, type DocStatus } from "@/lib/document-fields";
 
 export const Route = createFileRoute("/_authenticated/verificar/$id")({
@@ -23,9 +24,16 @@ export const Route = createFileRoute("/_authenticated/verificar/$id")({
 function Verificar() {
   const { id } = Route.useParams();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: sesion } = useSesion();
   const [valores, setValores] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
+  const [capturandoFoto, setCapturandoFoto] = useState(false);
+  const [camaraActiva, setCamaraActiva] = useState(false);
+  const [camaraEstado, setCamaraEstado] = useState<"iniciando" | "listo" | "error">("iniciando");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const { data: doc, refetch } = useQuery({
     queryKey: ["documento", id],
@@ -45,6 +53,100 @@ function Verificar() {
     setValores(iniciales);
   }, [doc]);
 
+  const detenerCamara = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setCamaraActiva(false);
+    setCamaraEstado("iniciando");
+  }, []);
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!camaraActiva) return;
+    let cancelled = false;
+    (async () => {
+      setCamaraEstado("iniciando");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } },
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => undefined);
+        }
+        setCamaraEstado("listo");
+      } catch {
+        if (!cancelled) {
+          setCamaraEstado("error");
+          toast.error("No se pudo abrir la cámara. Revise los permisos.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [camaraActiva]);
+
+  function abrirCamaraFoto() {
+    setCamaraActiva(true);
+  }
+
+  async function guardarFotoDesdeCamara() {
+    if (!doc || !sesion || capturandoFoto) return;
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) {
+      toast.error("Cámara no lista");
+      return;
+    }
+    setCapturandoFoto(true);
+    try {
+      const ancho = Math.min(1600, video.videoWidth || 1280);
+      const alto = Math.round((ancho / (video.videoWidth || 1)) * (video.videoHeight || 720));
+      canvas.width = ancho;
+      canvas.height = alto;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("No se pudo procesar la imagen");
+      ctx.drawImage(video, 0, 0, ancho, alto);
+
+      const { blob, bytes } = await canvasToJpegUnderLimit(canvas, 90 * 1024);
+      const nombre = `${sesion.userId}/${Date.now()}-foto.jpg`;
+      const { error: upErr } = await supabase.storage.from("documentos").upload(nombre, blob, {
+        contentType: "image/jpeg",
+      });
+      if (upErr) throw upErr;
+
+      const { error: updErr } = await supabase.from("documents").update({ foto_path: nombre }).eq("id", doc.id);
+      if (updErr) throw updErr;
+
+      await supabase.from("operation_logs").insert({
+        document_id: doc.id,
+        operator_id: sesion.userId,
+        evento: "Fotografía capturada",
+        detalle: `${bytes} bytes (desde verificación)`,
+      });
+
+      detenerCamara();
+      toast.success(`Fotografía guardada (${Math.round(bytes / 1024)} KB)`);
+      await refetch();
+      queryClient.invalidateQueries({ queryKey: ["foto-url"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo guardar la fotografía");
+    } finally {
+      setCapturandoFoto(false);
+    }
+  }
+
   const confianza = (doc?.confianza ?? {}) as Record<string, number>;
   const revisar = CAMPOS.filter((c) => (confianza[c.key] ?? 0) < 0.85 || !valores[c.key]);
   const meta = doc ? STATUS_META[doc.status as DocStatus] : null;
@@ -62,7 +164,7 @@ function Verificar() {
   async function confirmar() {
     if (!doc || !sesion) return;
     if (!doc.foto_path) {
-      toast.error("Falta la fotografía del contribuyente. Vuelva a escanear.");
+      toast.error("Falta la fotografía del contribuyente. Añádala arriba.");
       return;
     }
     const faltantes = CAMPOS.filter((c) => !valores[c.key]?.trim()).map((c) => c.label);
@@ -71,7 +173,6 @@ function Verificar() {
       return;
     }
 
-    // PC único del sistema (ya no se elige en pantalla)
     const { data: pcDefault } = await supabase
       .from("computers")
       .select("id")
@@ -116,6 +217,7 @@ function Verificar() {
 
   async function cancelar() {
     if (!doc || !sesion) return;
+    detenerCamara();
     await supabase.from("documents").update({ status: "cancelado" }).eq("id", doc.id);
     await supabase.from("operation_logs").insert({
       document_id: doc.id,
@@ -199,12 +301,70 @@ function Verificar() {
             <span className="text-[11px] font-medium text-destructive">Falta captura</span>
           )}
         </div>
-        {fotoUrl ? (
-          <img src={fotoUrl} alt="Fotografía del contribuyente" className="mx-auto max-h-48 object-contain py-3" />
+
+        {camaraActiva && !bloqueado ? (
+          <div className="p-3">
+            <div className="ink-panel relative overflow-hidden">
+              <video ref={videoRef} playsInline muted className="aspect-square w-full object-cover" />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
+                <div className="h-[70%] w-[70%] rounded-full border-2 border-dashed border-primary-foreground/50" />
+              </div>
+              {camaraEstado === "iniciando" ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-ink/70">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary-foreground" />
+                </div>
+              ) : null}
+            </div>
+            <canvas ref={canvasRef} className="hidden" />
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Cámara trasera · encuadre el rostro en el círculo
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={camaraEstado !== "listo" || capturandoFoto}
+                onClick={() => void guardarFotoDesdeCamara()}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+              >
+                {capturandoFoto ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                Capturar foto
+              </button>
+              <button
+                type="button"
+                disabled={capturandoFoto}
+                onClick={detenerCamara}
+                className="rounded-xl border border-border px-4 py-3 text-sm font-medium"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : fotoUrl ? (
+          <div className="px-4 py-3">
+            <img src={fotoUrl} alt="Fotografía del contribuyente" className="mx-auto max-h-48 object-contain" />
+            {!bloqueado ? (
+              <button
+                type="button"
+                onClick={() => void abrirCamaraFoto()}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-border px-4 py-2.5 text-sm font-medium"
+              >
+                <Camera className="h-4 w-4" /> Cambiar fotografía
+              </button>
+            ) : null}
+          </div>
         ) : (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">
-            No hay fotografía. Use «Volver a escanear» para capturar CI + foto.
-          </p>
+          <div className="px-4 py-6 text-center">
+            <p className="text-sm text-muted-foreground">No hay fotografía todavía.</p>
+            {!bloqueado ? (
+              <button
+                type="button"
+                onClick={() => void abrirCamaraFoto()}
+                className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground"
+              >
+                <Camera className="h-4 w-4" /> Añadir fotografía
+              </button>
+            ) : null}
+          </div>
         )}
       </section>
 
@@ -255,7 +415,7 @@ function Verificar() {
           <div className="mt-4 space-y-2.5">
             <button
               onClick={() => void confirmar()}
-              disabled={guardando}
+              disabled={guardando || !doc.foto_path}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
             >
               {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
