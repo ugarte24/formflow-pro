@@ -34,14 +34,12 @@ function Escanear() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const autoRef = useRef(0);
 
   const [fase, setFase] = useState<Fase>("ci");
   const [docId, setDocId] = useState<string | null>(null);
   const [estado, setEstado] = useState<"iniciando" | "listo" | "procesando" | "error">("iniciando");
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [calidad, setCalidad] = useState<Calidad>({ nitidez: 0, luz: 0, ok: false });
-  const [autoCaptura, setAutoCaptura] = useState(true);
   const [paso, setPaso] = useState("");
 
   const detener = useCallback(() => {
@@ -115,20 +113,10 @@ function Escanear() {
   useEffect(() => {
     if (estado !== "listo" || fase !== "ci") return;
     const id = window.setInterval(() => {
-      const ok = medirCalidad();
-      if (ok && autoCaptura) {
-        autoRef.current += 1;
-        if (autoRef.current >= 3) {
-          autoRef.current = 0;
-          void capturar();
-        }
-      } else {
-        autoRef.current = 0;
-      }
+      medirCalidad();
     }, 450);
     return () => window.clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, autoCaptura, medirCalidad, fase]);
+  }, [estado, medirCalidad, fase]);
 
   async function dibujarFrame(): Promise<HTMLCanvasElement> {
     const video = videoRef.current;
@@ -192,8 +180,6 @@ function Escanear() {
 
       setDocId(doc.id);
       setFase("foto");
-      setAutoCaptura(false);
-      autoRef.current = 0;
       toast.success("Documento leído. Ahora capture la fotografía.");
     } catch (error) {
       setEstado("listo");
@@ -309,16 +295,6 @@ function Escanear() {
                 valor={calidad.luz}
               />
             </div>
-
-            <label className="mt-4 flex items-center justify-between rounded-xl border border-border bg-background px-3.5 py-3">
-              <span className="text-sm font-medium">Captura automática</span>
-              <input
-                type="checkbox"
-                checked={autoCaptura}
-                onChange={(e) => setAutoCaptura(e.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-            </label>
           </>
         ) : (
           <p className="text-sm text-muted-foreground">
