@@ -1,12 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Download, Loader2, Monitor, Plus, ShieldCheck, Upload, Users } from "lucide-react";
+import { Download, Loader2, Monitor, Plus, ShieldCheck, Upload, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
-import { estadoInstaladorAgente, urlDescargaInstaladorAgente } from "@/lib/admin.functions";
+import {
+  crearUsuarioApp,
+  estadoInstaladorAgente,
+  urlDescargaInstaladorAgente,
+  type RolUsuario,
+} from "@/lib/admin.functions";
 
 export const Route = createFileRoute("/_authenticated/admin")({
   head: () => ({
@@ -36,6 +41,12 @@ function Admin() {
   const [codigo, setCodigo] = useState("");
   const [descargando, setDescargando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
+  const [creandoUsuario, setCreandoUsuario] = useState(false);
+  const [nuevoNombre, setNuevoNombre] = useState("");
+  const [nuevoEmail, setNuevoEmail] = useState("");
+  const [nuevoPassword, setNuevoPassword] = useState("");
+  const [nuevoTelefono, setNuevoTelefono] = useState("");
+  const [nuevoRol, setNuevoRol] = useState<RolUsuario>("operador");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { data: computadores } = useQuery({
@@ -125,6 +136,36 @@ function Admin() {
       }
     }
     queryClient.invalidateQueries({ queryKey: ["operadores"] });
+  }
+
+  async function crearUsuario() {
+    setCreandoUsuario(true);
+    try {
+      const creado = await crearUsuarioApp({
+        data: {
+          email: nuevoEmail,
+          password: nuevoPassword,
+          nombreCompleto: nuevoNombre,
+          telefono: nuevoTelefono,
+          rol: nuevoRol,
+        },
+      });
+      setNuevoNombre("");
+      setNuevoEmail("");
+      setNuevoPassword("");
+      setNuevoTelefono("");
+      setNuevoRol("operador");
+      toast.success(
+        creado.rol === "admin"
+          ? `Administrador creado: ${creado.email}`
+          : `Operador creado: ${creado.email}`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["operadores"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "No se pudo crear el usuario");
+    } finally {
+      setCreandoUsuario(false);
+    }
   }
 
   async function descargarInstalador() {
@@ -303,38 +344,103 @@ function Admin() {
         )}
       </section>
 
+      <section className="panel mt-4 p-4">
+        <p className="label-caps flex items-center gap-1.5">
+          <UserPlus className="h-3.5 w-3.5" /> Crear usuario
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Solo quienes tengan usuario creado aquí pueden entrar a la app. Elegí rol{" "}
+          <strong>Operador</strong> (escanea y envía) o <strong>Administrador</strong> (también gestiona el sistema).
+        </p>
+        <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+          <input
+            value={nuevoNombre}
+            onChange={(e) => setNuevoNombre(e.target.value)}
+            maxLength={120}
+            placeholder="Nombre completo"
+            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary sm:col-span-2"
+          />
+          <input
+            value={nuevoEmail}
+            onChange={(e) => setNuevoEmail(e.target.value)}
+            type="email"
+            maxLength={255}
+            placeholder="Correo (para iniciar sesión)"
+            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+          />
+          <input
+            value={nuevoPassword}
+            onChange={(e) => setNuevoPassword(e.target.value)}
+            type="password"
+            maxLength={72}
+            placeholder="Contraseña (mín. 6)"
+            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+          />
+          <input
+            value={nuevoTelefono}
+            onChange={(e) => setNuevoTelefono(e.target.value)}
+            maxLength={40}
+            placeholder="Teléfono (opcional)"
+            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+          />
+          <select
+            value={nuevoRol}
+            onChange={(e) => setNuevoRol(e.target.value as RolUsuario)}
+            className="rounded-xl border border-input bg-background px-3.5 py-2.5 text-sm outline-none focus:border-primary"
+          >
+            <option value="operador">Rol: Operador</option>
+            <option value="admin">Rol: Administrador</option>
+          </select>
+        </div>
+        <button
+          type="button"
+          disabled={creandoUsuario}
+          onClick={() => void crearUsuario()}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+        >
+          {creandoUsuario ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
+          Crear usuario
+        </button>
+      </section>
+
       <section className="panel mt-4 overflow-hidden">
         <p className="label-caps flex items-center gap-1.5 border-b border-border px-4 py-3">
-          <Users className="h-3.5 w-3.5" /> Operadores
+          <Users className="h-3.5 w-3.5" /> Usuarios
         </p>
         <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">
-          Desactivar un operador le impide entrar a la app y enviar trámites al PC.
+          Activá/desactivá el acceso o cambiá el rol. Sin usuario activo no pueden usar el aplicativo.
         </p>
         <ul className="divide-y divide-border">
-          {operadores?.map((o) => (
-            <li key={o.id} className="flex flex-wrap items-center gap-2 px-4 py-3.5 sm:gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{o.nombre_completo || "Sin nombre"}</p>
-                <p className="text-[11px] text-muted-foreground">{o.telefono || "Sin teléfono"}</p>
-              </div>
-              <button
-                onClick={() => void alternarOperadorActivo(o.id, o.activo)}
-                className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                  o.activo ? "bg-success/12 text-success" : "bg-destructive/10 text-destructive"
-                }`}
-              >
-                {o.activo ? "Activo" : "Desactivado"}
-              </button>
-              <button
-                onClick={() => void alternarAdmin(o.id, o.esAdmin)}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium ${
-                  o.esAdmin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-                }`}
-              >
-                <ShieldCheck className="h-3.5 w-3.5" /> {o.esAdmin ? "Administrador" : "Operador"}
-              </button>
+          {(operadores ?? []).length === 0 ? (
+            <li className="px-4 py-8 text-center text-sm text-muted-foreground">
+              Todavía no hay usuarios. Creá el primero arriba.
             </li>
-          ))}
+          ) : (
+            operadores?.map((o) => (
+              <li key={o.id} className="flex flex-wrap items-center gap-2 px-4 py-3.5 sm:gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{o.nombre_completo || "Sin nombre"}</p>
+                  <p className="text-[11px] text-muted-foreground">{o.telefono || "Sin teléfono"}</p>
+                </div>
+                <button
+                  onClick={() => void alternarOperadorActivo(o.id, o.activo)}
+                  className={`rounded-md px-2 py-1 text-[11px] font-medium ${
+                    o.activo ? "bg-success/12 text-success" : "bg-destructive/10 text-destructive"
+                  }`}
+                >
+                  {o.activo ? "Activo" : "Desactivado"}
+                </button>
+                <button
+                  onClick={() => void alternarAdmin(o.id, o.esAdmin)}
+                  className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium ${
+                    o.esAdmin ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" /> {o.esAdmin ? "Administrador" : "Operador"}
+                </button>
+              </li>
+            ))
+          )}
         </ul>
       </section>
     </AppShell>

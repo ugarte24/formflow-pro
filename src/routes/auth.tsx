@@ -80,7 +80,7 @@ function AuthPage() {
           <p className="label-caps">Acceso</p>
           <h1 className="mt-1 text-xl font-semibold">Iniciar sesión</h1>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Las cuentas las otorga el administrador. Si no tienes acceso, solicita una.
+            Las cuentas las crea el administrador (rol Operador o Administrador). Si no tienes acceso, pedile una.
           </p>
 
           <form onSubmit={enviar} className="mt-5 space-y-3.5">
