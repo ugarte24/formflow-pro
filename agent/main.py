@@ -30,14 +30,14 @@ def main() -> int:
 
     if not env_path.exists():
         log.error("Falta el archivo .env junto al programa: %s", env_path)
-        log.error("Copie .env.example a .env y complete BASE_URL + CODIGO_PC")
+        log.error("Copie .env.example a .env (solo hace falta BASE_URL)")
         if is_frozen():
             input("Presione Enter para salir…")
         return 1
 
-    base = os.getenv("BASE_URL", "").rstrip("/")
-    # Preferido: código de PC (sin token). Compat: AGENT_TOKEN legado.
-    codigo = (os.getenv("CODIGO_PC") or os.getenv("COMPUTER_CODE") or "").strip().upper()
+    base = os.getenv("BASE_URL", "").rstrip("/") or "https://formflow-pro-sigma.vercel.app"
+    # Codigo interno fijo; el operador no lo configura.
+    codigo = (os.getenv("CODIGO_PC") or os.getenv("COMPUTER_CODE") or "PC-DEFAULT").strip().upper() or "PC-DEFAULT"
     token_legado = os.getenv("AGENT_TOKEN", "").strip()
     poll = float(os.getenv("POLL_SECONDS", "4"))
     download = Path(
@@ -51,12 +51,6 @@ def main() -> int:
             input("Presione Enter para salir…")
         return 1
 
-    if not codigo and not (token_legado and len(token_legado) >= 20):
-        log.error("Configure CODIGO_PC en %s (ej. PC-VEN-01). Ya no se usa token.", env_path)
-        if is_frozen():
-            input("Presione Enter para salir…")
-        return 1
-
     dry = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
     if not dry:
         try:
@@ -66,11 +60,8 @@ def main() -> int:
                 input("Presione Enter para salir…")
             return 1
 
-    if codigo:
-        api = AgenteApi(base, codigo)
-        log.info("Auth por código de PC: %s", codigo)
-    else:
-        # Compatibilidad temporal con instalaciones viejas
+    if token_legado and len(token_legado) >= 20 and not (os.getenv("CODIGO_PC") or "").strip():
+        # Compat instalaciones viejas con token
         from requests import Session
 
         class _Legacy:
@@ -97,7 +88,10 @@ def main() -> int:
                 return r.json()
 
         api = _Legacy()  # type: ignore[assignment]
-        log.warning("Usando AGENT_TOKEN legado — migre a CODIGO_PC")
+        log.warning("Usando AGENT_TOKEN legado")
+    else:
+        api = AgenteApi(base, codigo)
+        log.info("Conectado a %s", base)
 
     automator = RuatAutomator(download_dir=download)
 

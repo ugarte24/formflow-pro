@@ -193,8 +193,8 @@ function Admin() {
           ) : null}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Descargá la última versión, pasásela al operador. Él descomprime, ejecuta{" "}
-          <strong>Instalar.bat</strong> y deja <strong>CODIGO_PC=PC-DEFAULT</strong>.
+          Descargá la última versión y pasásela al operador. Él descomprime y ejecuta{" "}
+          <strong>Instalar.bat</strong> — no tiene que configurar códigos.
         </p>
 
         <button

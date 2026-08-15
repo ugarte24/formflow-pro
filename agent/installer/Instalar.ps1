@@ -56,22 +56,20 @@ try {
   }
 
   if (-not (Test-Path $envDest)) {
-    $example = Join-Path $Destino ".env.example"
-    if (Test-Path $example) {
-      Copy-Item $example $envDest
-    } else {
-      @(
-        "BASE_URL=https://formflow-pro-sigma.vercel.app"
-        "CODIGO_PC=PC-DEFAULT"
-        "FIREFOX_MODE=persistent"
-        "POLL_SECONDS=4"
-      ) | Set-Content -Encoding ASCII $envDest
+    @(
+      "BASE_URL=https://formflow-pro-sigma.vercel.app"
+      "POLL_SECONDS=4"
+      "FIREFOX_MODE=persistent"
+    ) | Set-Content -Encoding ASCII $envDest
+    Write-Host "Se creo .env automaticamente (sin codigo de PC)." -ForegroundColor Green
+  } else {
+    # Completar CODIGO_PC vacio en instalaciones anteriores
+    $envText = Get-Content $envDest -Raw -ErrorAction SilentlyContinue
+    if ($envText -match '(?m)^CODIGO_PC=\s*$') {
+      $envText = $envText -replace '(?m)^CODIGO_PC=\s*$', 'CODIGO_PC=PC-DEFAULT'
+      Set-Content -Encoding ASCII -Path $envDest -Value $envText.TrimEnd()
+      Write-Host "Se completo CODIGO_PC=PC-DEFAULT en .env existente." -ForegroundColor Yellow
     }
-    Write-Host ""
-    Write-Host "IMPORTANTE: Revise BASE_URL en el Bloc de notas. CODIGO_PC=PC-DEFAULT." -ForegroundColor Yellow
-    Start-Process notepad $envDest
-    Write-Host "Cuando guarde y cierre el Bloc de notas, pulse Enter aqui..."
-    Read-Host | Out-Null
   }
 
   $bat = Join-Path $Destino "Iniciar-Agente.bat"
