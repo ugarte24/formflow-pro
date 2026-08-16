@@ -14,6 +14,7 @@ from api_client import AgenteApi
 from app_paths import app_dir, is_frozen
 from ensure_browsers import ensure_playwright_firefox
 from ruat_flow import ContribuyenteYaRegistrado, DatosOcrInvalidos, RuatAutomator
+from session_auth import SESSION_NAME, ensure_logged_in
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,9 +37,6 @@ def main() -> int:
         return 1
 
     base = os.getenv("BASE_URL", "").rstrip("/") or "https://formflow-pro-sigma.vercel.app"
-    # Codigo interno fijo; el operador no lo configura.
-    codigo = (os.getenv("CODIGO_PC") or os.getenv("COMPUTER_CODE") or "PC-DEFAULT").strip().upper() or "PC-DEFAULT"
-    token_legado = os.getenv("AGENT_TOKEN", "").strip()
     poll = float(os.getenv("POLL_SECONDS", "4"))
     download = Path(
         os.path.expandvars(os.getenv("DOWNLOAD_DIR", r"%USERPROFILE%\DigitalizadorAgent\downloads"))
@@ -60,44 +58,21 @@ def main() -> int:
                 input("Presione Enter para salir…")
             return 1
 
-    if token_legado and len(token_legado) >= 20 and not (os.getenv("CODIGO_PC") or "").strip():
-        # Compat instalaciones viejas con token
-        from requests import Session
+    try:
+        session = ensure_logged_in(base, base_path / SESSION_NAME)
+    except Exception as exc:
+        log.error("No se pudo iniciar sesión: %s", exc)
+        if is_frozen():
+            input("Presione Enter para salir…")
+        return 1
 
-        class _Legacy:
-            def __init__(self) -> None:
-                self.session = Session()
-                self.session.headers.update(
-                    {"x-agent-token": token_legado, "Accept": "application/json"}
-                )
-                self.base = base
-
-            def pendientes(self) -> dict:
-                r = self.session.get(f"{self.base}/api/public/agente/pendientes", timeout=30)
-                r.raise_for_status()
-                return r.json()
-
-            def resultado(self, document_id: str, estado: str, mensaje: str | None = None) -> dict:
-                body = {"documentId": document_id, "estado": estado}
-                if mensaje:
-                    body["mensaje"] = mensaje
-                r = self.session.post(
-                    f"{self.base}/api/public/agente/resultado", json=body, timeout=30
-                )
-                r.raise_for_status()
-                return r.json()
-
-        api = _Legacy()  # type: ignore[assignment]
-        log.warning("Usando AGENT_TOKEN legado")
-    else:
-        api = AgenteApi(base, codigo)
-        log.info("Conectado a %s", base)
-
+    api = AgenteApi(base, session)
     automator = RuatAutomator(download_dir=download)
 
     log.info(
-        "Agente iniciado · %s · poll=%ss · mode=%s · dir=%s",
+        "Agente iniciado · %s · usuario=%s · poll=%ss · mode=%s · dir=%s",
         base,
+        session.email or session.user_id,
         poll,
         automator.mode,
         base_path,

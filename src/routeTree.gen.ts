@@ -18,7 +18,9 @@ import { Route as AuthenticatedHistorialRouteImport } from './routes/_authentica
 import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
 import { Route as AuthenticatedPerfilRouteImport } from './routes/_authenticated/perfil'
 import { Route as AuthenticatedVerificarIdRouteImport } from './routes/_authenticated/verificar.$id'
+import { Route as ApiPublicAgenteLoginRouteImport } from './routes/api/public/agente/login'
 import { Route as ApiPublicAgentePendientesRouteImport } from './routes/api/public/agente/pendientes'
+import { Route as ApiPublicAgenteRefreshRouteImport } from './routes/api/public/agente/refresh'
 import { Route as ApiPublicAgenteResultadoRouteImport } from './routes/api/public/agente/resultado'
 
 const IndexRoute = IndexRouteImport.update({
@@ -66,12 +68,22 @@ const AuthenticatedVerificarIdRoute =
     path: '/verificar/$id',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicAgenteLoginRoute = ApiPublicAgenteLoginRouteImport.update({
+  id: '/api/public/agente/login',
+  path: '/api/public/agente/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAgentePendientesRoute =
   ApiPublicAgentePendientesRouteImport.update({
     id: '/api/public/agente/pendientes',
     path: '/api/public/agente/pendientes',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicAgenteRefreshRoute = ApiPublicAgenteRefreshRouteImport.update({
+  id: '/api/public/agente/refresh',
+  path: '/api/public/agente/refresh',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicAgenteResultadoRoute =
   ApiPublicAgenteResultadoRouteImport.update({
     id: '/api/public/agente/resultado',
@@ -88,7 +100,9 @@ export interface FileRoutesByFullPath {
   '/inicio': typeof AuthenticatedInicioRoute
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
   '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRoutesByTo {
@@ -100,7 +114,9 @@ export interface FileRoutesByTo {
   '/inicio': typeof AuthenticatedInicioRoute
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
   '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRoutesById {
@@ -114,7 +130,9 @@ export interface FileRoutesById {
   '/_authenticated/inicio': typeof AuthenticatedInicioRoute
   '/_authenticated/perfil': typeof AuthenticatedPerfilRoute
   '/_authenticated/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
+  '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
   '/api/public/agente/resultado': typeof ApiPublicAgenteResultadoRoute
 }
 export interface FileRouteTypes {
@@ -128,7 +146,9 @@ export interface FileRouteTypes {
     | '/inicio'
     | '/perfil'
     | '/verificar/$id'
+    | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/refresh'
     | '/api/public/agente/resultado'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -140,7 +160,9 @@ export interface FileRouteTypes {
     | '/inicio'
     | '/perfil'
     | '/verificar/$id'
+    | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/refresh'
     | '/api/public/agente/resultado'
   id:
     | '__root__'
@@ -153,7 +175,9 @@ export interface FileRouteTypes {
     | '/_authenticated/inicio'
     | '/_authenticated/perfil'
     | '/_authenticated/verificar/$id'
+    | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
+    | '/api/public/agente/refresh'
     | '/api/public/agente/resultado'
   fileRoutesById: FileRoutesById
 }
@@ -161,7 +185,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicAgenteLoginRoute: typeof ApiPublicAgenteLoginRoute
   ApiPublicAgentePendientesRoute: typeof ApiPublicAgentePendientesRoute
+  ApiPublicAgenteRefreshRoute: typeof ApiPublicAgenteRefreshRoute
   ApiPublicAgenteResultadoRoute: typeof ApiPublicAgenteResultadoRoute
 }
 
@@ -230,11 +256,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVerificarIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/agente/login': {
+      id: '/api/public/agente/login'
+      path: '/api/public/agente/login'
+      fullPath: '/api/public/agente/login'
+      preLoaderRoute: typeof ApiPublicAgenteLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/agente/pendientes': {
       id: '/api/public/agente/pendientes'
       path: '/api/public/agente/pendientes'
       fullPath: '/api/public/agente/pendientes'
       preLoaderRoute: typeof ApiPublicAgentePendientesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/agente/refresh': {
+      id: '/api/public/agente/refresh'
+      path: '/api/public/agente/refresh'
+      fullPath: '/api/public/agente/refresh'
+      preLoaderRoute: typeof ApiPublicAgenteRefreshRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/agente/resultado': {
@@ -272,7 +312,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicAgenteLoginRoute: ApiPublicAgenteLoginRoute,
   ApiPublicAgentePendientesRoute: ApiPublicAgentePendientesRoute,
+  ApiPublicAgenteRefreshRoute: ApiPublicAgenteRefreshRoute,
   ApiPublicAgenteResultadoRoute: ApiPublicAgenteResultadoRoute,
 }
 export const routeTree = rootRouteImport

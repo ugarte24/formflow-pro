@@ -1,11 +1,21 @@
-/** Autorización del agente Windows: por código de PC (sin token). */
+/** Autorización del agente Windows: sesión de usuario (preferido) o PC legado. */
 
-export type AgenteAuthOk = {
+export type AgenteAuthUser = {
+  mode: "user";
+  userId: string;
+  email: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabaseAdmin: any;
+};
+
+export type AgenteAuthComputer = {
+  mode: "computer";
   pc: { id: string; nombre: string; codigo: string; activo: boolean };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabaseAdmin: any;
 };
 
+export type AgenteAuthOk = AgenteAuthUser | AgenteAuthComputer;
 export type AgenteAuthResult = AgenteAuthOk | { error: Response };
 
 function json(body: unknown, status = 200) {
@@ -15,14 +25,46 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function bearerToken(request: Request): string | null {
+  const h = request.headers.get("authorization")?.trim();
+  if (!h) return null;
+  const m = /^Bearer\s+(.+)$/i.exec(h);
+  return m?.[1]?.trim() || null;
+}
+
 /**
- * Auth del agente:
- * 1) Preferido: header `x-computer-code` (ej. PC-VEN-01) — sin secretos en el PC
- * 2) Compat: header `x-agent-token` (legado)
- * El PC debe estar activo. Si no, 403.
+ * Auth del agente (prioridad):
+ * 1) Authorization: Bearer <access_token> — mismas credenciales que la web
+ * 2) x-computer-code — legado
+ * 3) x-agent-token — legado
  */
 export async function autorizarAgente(request: Request): Promise<AgenteAuthResult> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+  const jwt = bearerToken(request);
+  if (jwt) {
+    const { data, error } = await supabaseAdmin.auth.getUser(jwt);
+    if (error || !data.user) {
+      return { error: json({ error: "Sesión inválida o expirada. Vuelva a iniciar sesión." }, 401) };
+    }
+
+    const { data: perfil } = await supabaseAdmin
+      .from("profiles")
+      .select("id, activo")
+      .eq("id", data.user.id)
+      .maybeSingle();
+
+    if (perfil && perfil.activo === false) {
+      return { error: json({ error: "Usuario desactivado. Contacte al administrador." }, 403) };
+    }
+
+    return {
+      mode: "user",
+      userId: data.user.id,
+      email: data.user.email ?? null,
+      supabaseAdmin,
+    };
+  }
 
   const codigo = request.headers.get("x-computer-code")?.trim().toUpperCase();
   const token = request.headers.get("x-agent-token")?.trim();
@@ -46,7 +88,7 @@ export async function autorizarAgente(request: Request): Promise<AgenteAuthResul
   } else {
     return {
       error: json(
-        { error: "Indique x-computer-code (código del PC) o x-agent-token legado" },
+        { error: "Indique Authorization Bearer (login) o x-computer-code legado" },
         401,
       ),
     };
@@ -63,5 +105,5 @@ export async function autorizarAgente(request: Request): Promise<AgenteAuthResul
   }
 
   await supabaseAdmin.from("computers").update({ last_seen_at: new Date().toISOString() }).eq("id", pc.id);
-  return { pc, supabaseAdmin };
+  return { mode: "computer", pc, supabaseAdmin };
 }

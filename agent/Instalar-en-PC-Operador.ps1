@@ -41,7 +41,7 @@ if ($envBackup -and (Test-Path $envBackup)) {
 $envDest = Join-Path $Destino ".env"
 if (-not (Test-Path $envDest)) {
   Copy-Item (Join-Path $Destino ".env.example") $envDest
-  Write-Host "Se creó .env desde .env.example — COMPLETE BASE_URL y CODIGO_PC (sin token)" -ForegroundColor Yellow
+  Write-Host "Se creó .env desde .env.example — COMPLETE BASE_URL" -ForegroundColor Yellow
   notepad $envDest
 }
 
@@ -59,6 +59,6 @@ Write-Host ""
 Write-Host "Instalación lista." -ForegroundColor Green
 Write-Host "Carpeta: $Destino"
 Write-Host "Acceso directo: $lnkPath"
-Write-Host "1) Edite .env (BASE_URL + CODIGO_PC)"
-Write-Host "2) Doble clic en 'Digitalizador Agent' del Escritorio"
-Write-Host "3) Primer arranque: descarga Firefox (esperar). Luego inicie sesión RUAT una vez."
+Write-Host "1) Edite .env (BASE_URL) si hace falta"
+Write-Host "2) Doble clic en 'Digitalizador Agent' e inicie sesión con su cuenta de la web"
+Write-Host "3) Primer arranque: descarga Firefox. Luego inicie sesión RUAT una vez."

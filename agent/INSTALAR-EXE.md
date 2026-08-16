@@ -6,8 +6,8 @@
 2. Pulsá **Descargar DigitalizadorAgent-Setup.zip**
 3. Pasá el ZIP al PC del operador (USB / Drive / WhatsApp)
 4. Descomprimí → doble clic en **Instalar.bat**
-5. `CODIGO_PC` ya no hace falta — el agente lo usa solo por dentro
-6. Usá el icono **Digitalizador Agent** del Escritorio
+5. Abrí **Digitalizador Agent** e iniciá sesión con el **mismo email y contraseña** de la web
+6. Dejá Firefox/RUAT listo; los trámites que confirmés en el celular llegan a **tu** cola
 
 El programa queda en `%LOCALAPPDATA%\Digitalizador\DigitalizadorAgent`.
 
@@ -26,7 +26,7 @@ También podés publicar con:
 ## Actualizar en el PC del operador
 
 1. Descargá el ZIP nuevo desde Admin
-2. Descomprimí y ejecutá otra vez **Instalar.bat** (conserva el `.env` / código de PC)
+2. Descomprimí y ejecutá otra vez **Instalar.bat** (conserva el `.env` y la sesión)
 
 ## Notas
 

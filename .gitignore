@@ -29,10 +29,13 @@ service-account*.json
 # Agente Windows
 agent/.venv/
 agent/.env
+agent/session.json
 agent/downloads/
 agent/build/
 agent/dist/
 agent/*.spec.bak
+agent/__pycache__/
+agent/**/__pycache__/
 
 # Supabase CLI local
 supabase/.temp/

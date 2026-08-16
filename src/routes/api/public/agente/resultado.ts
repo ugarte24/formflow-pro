@@ -21,7 +21,7 @@ export const Route = createFileRoute("/api/public/agente/resultado")({
       POST: async ({ request }) => {
         const auth = await autorizarAgente(request);
         if ("error" in auth) return auth.error;
-        const { pc, supabaseAdmin } = auth;
+        const { supabaseAdmin } = auth;
 
         const parsed = Esquema.safeParse(await request.json().catch(() => null));
         if (!parsed.success) return json({ error: "Payload inválido" }, 400);
@@ -32,7 +32,15 @@ export const Route = createFileRoute("/api/public/agente/resultado")({
           .select("id, computer_id, operator_id")
           .eq("id", documentId)
           .maybeSingle();
-        if (!doc || doc.computer_id !== pc.id) return json({ error: "Documento no encontrado" }, 404);
+        if (!doc) return json({ error: "Documento no encontrado" }, 404);
+
+        if (auth.mode === "user") {
+          if (doc.operator_id !== auth.userId) {
+            return json({ error: "Documento no encontrado" }, 404);
+          }
+        } else if (doc.computer_id !== auth.pc.id) {
+          return json({ error: "Documento no encontrado" }, 404);
+        }
 
         const { error } = await supabaseAdmin
           .from("documents")

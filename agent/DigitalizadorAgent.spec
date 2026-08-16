@@ -17,6 +17,7 @@ a = Analysis(
     ],
     hiddenimports=[
         'api_client',
+        'session_auth',
         'ruat_flow',
         'app_paths',
         'ensure_browsers',

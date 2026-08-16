@@ -9,40 +9,70 @@ function json(body: unknown, status = 200) {
   });
 }
 
+type DocPendiente = {
+  id: string;
+  numero_documento: string | null;
+  nombres: string | null;
+  apellidos: string | null;
+  genero: string | null;
+  estado_civil: string | null;
+  fecha_nacimiento: string | null;
+  barrio: string | null;
+  avenida: string | null;
+  numero_puerta: string | null;
+  image_path: string | null;
+  foto_path: string | null;
+  sent_at: string | null;
+  operator_id: string | null;
+};
+
 export const Route = createFileRoute("/api/public/agente/pendientes")({
   server: {
     handlers: {
       GET: async ({ request }) => {
         const auth = await autorizarAgente(request);
         if ("error" in auth) return auth.error;
-        const { pc, supabaseAdmin } = auth;
+        const { supabaseAdmin } = auth;
 
-        const { data, error } = await supabaseAdmin
+        let query = supabaseAdmin
           .from("documents")
           .select(
             "id, numero_documento, nombres, apellidos, genero, estado_civil, fecha_nacimiento, barrio, avenida, numero_puerta, image_path, foto_path, sent_at, operator_id",
           )
-          .eq("computer_id", pc.id)
           .eq("status", "confirmado")
           .not("foto_path", "is", null)
           .order("sent_at", { ascending: true })
           .limit(10);
-        if (error) return json({ error: error.message }, 500);
 
-        // Solo trámites de operadores activos
-        const operatorIds = [...new Set((data ?? []).map((d) => d.operator_id).filter(Boolean))] as string[];
-        let activos = new Set<string>();
-        if (operatorIds.length > 0) {
-          const { data: perfiles } = await supabaseAdmin
-            .from("profiles")
-            .select("id, activo")
-            .in("id", operatorIds);
-          activos = new Set((perfiles ?? []).filter((p) => p.activo !== false).map((p) => p.id));
+        if (auth.mode === "user") {
+          query = query.eq("operator_id", auth.userId);
+        } else {
+          query = query.eq("computer_id", auth.pc.id);
         }
 
-        const listos = (data ?? []).filter(
-          (d) => !!d.foto_path && (!d.operator_id || activos.has(d.operator_id)),
-        );
+        const { data, error } = await query;
+        if (error) return json({ error: error.message }, 500);
+
+        let listos = (data ?? []) as DocPendiente[];
+
+        if (auth.mode === "computer") {
+          const operatorIds = [...new Set(listos.map((d) => d.operator_id).filter(Boolean))] as string[];
+          let activos = new Set<string>();
+          if (operatorIds.length > 0) {
+            const { data: perfiles } = await supabaseAdmin
+              .from("profiles")
+              .select("id, activo")
+              .in("id", operatorIds);
+            activos = new Set(
+              ((perfiles ?? []) as { id: string; activo: boolean | null }[])
+                .filter((p) => p.activo !== false)
+                .map((p) => p.id),
+            );
+          }
+          listos = listos.filter((d) => !!d.foto_path && (!d.operator_id || activos.has(d.operator_id)));
+        } else {
+          listos = listos.filter((d) => !!d.foto_path);
+        }
 
         if (listos.length > 0) {
           await supabaseAdmin
@@ -94,7 +124,13 @@ export const Route = createFileRoute("/api/public/agente/pendientes")({
           }),
         );
 
-        return json({ computador: pc.codigo, documentos });
+        return json({
+          modo: auth.mode,
+          operador: auth.mode === "user" ? auth.email : null,
+          computador: auth.mode === "computer" ? auth.pc.codigo : null,
+          etiqueta: auth.mode === "user" ? (auth.email ?? auth.userId) : auth.pc.codigo,
+          documentos,
+        });
       },
     },
   },

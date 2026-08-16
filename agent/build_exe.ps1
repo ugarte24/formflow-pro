@@ -42,7 +42,7 @@ Copy-Item -Force "DigitalizadorAgent.ico" (Join-Path $out "DigitalizadorAgent.ic
 cd /d "%~dp0"
 if not exist ".env" (
   echo Falta el archivo .env
-  echo Copie .env.example a .env y complete BASE_URL y CODIGO_PC
+  echo Copie .env.example a .env y complete BASE_URL
   pause
   exit /b 1
 )
@@ -52,5 +52,5 @@ pause
 
 Write-Host ""
 Write-Host "Listo: $out" -ForegroundColor Green
-Write-Host "Copie esa carpeta al PC del operador, cree .env y ejecute Iniciar-Agente.bat"
-Write-Host "El primer arranque descarga Firefox de Playwright (una sola vez)."
+Write-Host "Copie esa carpeta al PC del operador, cree .env (BASE_URL) y ejecute Iniciar-Agente.bat"
+Write-Host "Al arrancar pedira email/contrasena (las mismas de la web)."

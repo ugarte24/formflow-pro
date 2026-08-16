@@ -20,8 +20,8 @@ Resumen:
 
 - Windows 10/11
 - Python 3.11+
-- Firefox instalado
-- Código del PC (panel Admin → Computadores, ej. PC-VEN-01). Sin token.
+- Firefox (Playwright lo descarga)
+- Misma cuenta de Digitalizador (email/contraseña de la web)
 - Sesión RUAT en el perfil del agente (IP autorizada del PC)
 
 ## Configuración (desarrollo)
@@ -33,7 +33,7 @@ python -m venv .venv
 pip install -r requirements.txt
 playwright install firefox
 copy .env.example .env
-# Editar .env: BASE_URL + CODIGO_PC
+# Editar .env: BASE_URL
 ```
 
 ## Modos de Firefox
@@ -52,6 +52,8 @@ Ajuste selectores CSS/texto en `selectors.json` sin tocar Python.
 python main.py
 ```
 
+Al arrancar pedirá **email y contraseña** (las mismas de la web). La sesión se guarda en `session.json`.
+
 Prueba de API sin tocar Firefox:
 
 ```powershell
@@ -59,7 +61,7 @@ Prueba de API sin tocar Firefox:
 python main.py
 ```
 
-El agente hace polling a `GET /api/public/agente/pendientes` y reporta con `POST /api/public/agente/resultado`.
+El agente hace polling a `GET /api/public/agente/pendientes` (Bearer) y reporta con `POST /api/public/agente/resultado`. Cada cuenta solo ve **sus** trámites confirmados.
 
 ## Flujo RUAT automatizado
 

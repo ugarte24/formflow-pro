@@ -212,8 +212,9 @@ function Admin() {
           ) : null}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          Descargá la última versión y pasásela al operador. Él descomprime y ejecuta{" "}
-          <strong>Instalar.bat</strong> — no tiene que configurar códigos.
+          Descargá la última versión y pasásela al operador. Él descomprime, ejecuta{" "}
+          <strong>Instalar.bat</strong> y entra al agente con el <strong>mismo email y contraseña</strong>{" "}
+          de Digitalizador. Cada cuenta solo procesa sus propios trámites.
         </p>
 
         <button

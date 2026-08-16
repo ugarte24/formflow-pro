@@ -61,16 +61,10 @@ try {
       "POLL_SECONDS=4"
       "FIREFOX_MODE=persistent"
     ) | Set-Content -Encoding ASCII $envDest
-    Write-Host "Se creo .env automaticamente (sin codigo de PC)." -ForegroundColor Green
-  } else {
-    # Completar CODIGO_PC vacio en instalaciones anteriores
-    $envText = Get-Content $envDest -Raw -ErrorAction SilentlyContinue
-    if ($envText -match '(?m)^CODIGO_PC=\s*$') {
-      $envText = $envText -replace '(?m)^CODIGO_PC=\s*$', 'CODIGO_PC=PC-DEFAULT'
-      Set-Content -Encoding ASCII -Path $envDest -Value $envText.TrimEnd()
-      Write-Host "Se completo CODIGO_PC=PC-DEFAULT en .env existente." -ForegroundColor Yellow
-    }
+    Write-Host "Se creo .env automaticamente (solo BASE_URL)." -ForegroundColor Green
   }
+
+  Write-Host "Al iniciar el agente, use el mismo email y contrasena de la web." -ForegroundColor Cyan
 
   $bat = Join-Path $Destino "Iniciar-Agente.bat"
   if (-not (Test-Path $bat)) {

@@ -34,8 +34,7 @@ Digitalizador Agent — Instalación
 
 1. Descomprimí este ZIP en cualquier carpeta (ej. Escritorio).
 2. Doble clic en Instalar.bat
-3. Completá BASE_URL y CODIGO_PC (ej. PC-VEN-01) cuando se abra el Bloc de notas.
-   Ya no se usa token. El admin activa/desactiva operadores desde la web.
+3. Al abrir Digitalizador Agent, inicie sesión con el mismo email/contraseña de la web.
 4. Usá el icono "Digitalizador Agent" del Escritorio.
 
 No hace falta copiar carpetas a mano después de instalar.

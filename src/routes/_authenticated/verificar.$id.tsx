@@ -173,28 +173,13 @@ function Verificar() {
       return;
     }
 
-    const { data: pcDefault } = await supabase
-      .from("computers")
-      .select("id")
-      .eq("codigo", "PC-DEFAULT")
-      .eq("activo", true)
-      .maybeSingle();
-    const { data: pcFallback } = pcDefault
-      ? { data: null }
-      : await supabase.from("computers").select("id").eq("activo", true).order("created_at").limit(1).maybeSingle();
-    const computerId = pcDefault?.id ?? pcFallback?.id;
-    if (!computerId) {
-      toast.error("No hay PC del agente configurado. Contacte al administrador.");
-      return;
-    }
-
     setGuardando(true);
     try {
       const { error } = await supabase
         .from("documents")
         .update({
           ...valores,
-          computer_id: computerId,
+          computer_id: null,
           status: "confirmado",
           sent_at: new Date().toISOString(),
           error_message: null,
@@ -204,9 +189,9 @@ function Verificar() {
       await supabase.from("operation_logs").insert({
         document_id: doc.id,
         operator_id: sesion.userId,
-        evento: "Datos confirmados y enviados al PC",
+        evento: "Datos confirmados — en cola del agente (misma cuenta)",
       });
-      toast.success("Datos enviados. Esperando al agente de escritorio…");
+      toast.success("Datos enviados. Inicie sesión en Digitalizador Agent con su misma cuenta…");
       await refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo enviar");
