@@ -1,39 +1,54 @@
-"""Digitalizador Agent — polling + orquestación RUAT."""
+"""Digitalizador Agent — bandeja del sistema + polling RUAT."""
 
 from __future__ import annotations
 
 import logging
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from api_client import AgenteApi
-from app_paths import app_dir, is_frozen
+from app_paths import app_dir, is_frozen, resolve_data_file
 from ensure_browsers import ensure_playwright_firefox
 from ruat_flow import ContribuyenteYaRegistrado, DatosOcrInvalidos, RuatAutomator
 from session_auth import SESSION_NAME, ensure_logged_in
+from tray_ui import TrayApp, show_error
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
 log = logging.getLogger("digitalizador-agent")
+
+
+def setup_logging(log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+    # En desarrollo (no frozen) también a consola si hay
+    if not is_frozen() and sys.stderr and hasattr(sys.stderr, "write"):
+        sh = logging.StreamHandler(sys.stderr)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
 
 
 def main() -> int:
     base_path = app_dir()
+    log_path = base_path / "agent.log"
+    setup_logging(log_path)
+
     env_path = base_path / ".env"
     load_dotenv(env_path)
 
     if not env_path.exists():
-        log.error("Falta el archivo .env junto al programa: %s", env_path)
-        log.error("Copie .env.example a .env (solo hace falta BASE_URL)")
-        if is_frozen():
-            input("Presione Enter para salir…")
+        msg = f"Falta el archivo .env junto al programa:\n{env_path}\n\nCopie .env.example a .env (solo BASE_URL)."
+        log.error(msg)
+        show_error("Digitalizador Agent", msg)
         return 1
 
     base = os.getenv("BASE_URL", "").rstrip("/") or "https://formflow-pro-sigma.vercel.app"
@@ -44,30 +59,32 @@ def main() -> int:
     download.mkdir(parents=True, exist_ok=True)
 
     if not base:
-        log.error("Configure BASE_URL en %s", env_path)
-        if is_frozen():
-            input("Presione Enter para salir…")
+        show_error("Digitalizador Agent", f"Configure BASE_URL en:\n{env_path}")
         return 1
 
     dry = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
     if not dry:
         try:
             ensure_playwright_firefox()
-        except Exception:
-            if is_frozen():
-                input("Presione Enter para salir…")
+        except Exception as exc:
+            show_error(
+                "Digitalizador Agent",
+                f"No se pudo preparar Firefox de Playwright.\n{exc}",
+            )
             return 1
 
     try:
         session = ensure_logged_in(base, base_path / SESSION_NAME)
     except Exception as exc:
         log.error("No se pudo iniciar sesión: %s", exc)
-        if is_frozen():
-            input("Presione Enter para salir…")
+        if "cancelado" not in str(exc).lower():
+            show_error("Digitalizador Agent", f"No se pudo iniciar sesión:\n{exc}")
         return 1
 
     api = AgenteApi(base, session)
     automator = RuatAutomator(download_dir=download)
+    status = {"text": "Iniciando…"}
+    stop = threading.Event()
 
     log.info(
         "Agente iniciado · %s · usuario=%s · poll=%ss · mode=%s · dir=%s",
@@ -82,67 +99,117 @@ def main() -> int:
 
     try:
         if not automator.dry_run:
+            status["text"] = "Conectando Firefox…"
             automator.connect()
     except Exception as exc:
         log.error("No se pudo conectar a Firefox/Playwright: %s", exc)
-        log.error("Verifique la instalación de Firefox (primer arranque) o FIREFOX_MODE")
-        if is_frozen():
-            input("Presione Enter para salir…")
+        show_error(
+            "Digitalizador Agent",
+            "No se pudo conectar a Firefox/Playwright.\n"
+            "Verifique la instalación o FIREFOX_MODE.\n\n"
+            f"{exc}",
+        )
         return 1
 
-    while True:
-        try:
-            payload = api.pendientes()
-            docs = payload.get("documentos") or []
-            if not docs:
-                time.sleep(poll)
-                continue
+    def worker() -> None:
+        status["text"] = "Esperando trámites…"
+        while not stop.is_set():
+            try:
+                payload = api.pendientes()
+                docs = payload.get("documentos") or []
+                if not docs:
+                    status["text"] = "Esperando trámites…"
+                    stop.wait(poll)
+                    continue
 
-            for doc in docs:
-                doc_id = doc["id"]
-                log.info("Procesando %s · CI %s", doc_id, doc.get("numero_documento"))
-                try:
-                    if not automator.dry_run:
-                        automator.ensure_connected()
-                    automator.procesar(doc)
-                    api.resultado(
-                        doc_id,
-                        "formulario_completado",
-                        "Revise el Reporte de Control de Datos con el contribuyente y luego pulse Grabar en RUAT. El agente no guardó el trámite.",
-                    )
-                    log.info("OK %s — operador debe revisar reporte y Grabar", doc_id)
-                except ContribuyenteYaRegistrado as ya:
-                    log.warning("CI ya registrado: %s", ya.mensaje)
-                    api.resultado(doc_id, "error_automatizacion", ya.mensaje[:500])
-                except DatosOcrInvalidos as datos:
-                    log.warning("OCR inválido: %s", datos.mensaje)
-                    api.resultado(doc_id, "error_automatizacion", datos.mensaje[:500])
-                except Exception as exc:
-                    log.exception("Error automatizando %s", doc_id)
-                    msg = str(exc)
-                    if "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
-                        msg = (
-                            "Se perdio el control de Nightly. Cierre TODAS las ventanas Nightly, "
-                            "inicie solo Digitalizador Agent, espere la Nightly que abre el agente, "
-                            "inicie sesion RUAT ahi (no abra otra Nightly a mano) y vuelva a enviar."
-                        )
-                        try:
-                            automator.ensure_connected()
-                        except Exception as recon:
-                            log.error("No se pudo reconectar Firefox: %s", recon)
+                for doc in docs:
+                    if stop.is_set():
+                        break
+                    doc_id = doc["id"]
+                    ci = doc.get("numero_documento") or "?"
+                    status["text"] = f"Procesando CI {ci}"
+                    log.info("Procesando %s · CI %s", doc_id, ci)
                     try:
-                        api.resultado(doc_id, "error_automatizacion", msg[:500])
-                    except Exception as report_exc:
-                        log.error("No se pudo reportar error: %s", report_exc)
-        except KeyboardInterrupt:
-            log.info("Detenido por el usuario")
-            break
-        except Exception as exc:
-            log.error("Error de ciclo: %s", exc)
-            time.sleep(poll)
+                        if not automator.dry_run:
+                            automator.ensure_connected()
+                        automator.procesar(doc)
+                        api.resultado(
+                            doc_id,
+                            "formulario_completado",
+                            "Revise el Reporte de Control de Datos con el contribuyente y luego pulse Grabar en RUAT. El agente no guardó el trámite.",
+                        )
+                        log.info("OK %s — operador debe revisar reporte y Grabar", doc_id)
+                        status["text"] = f"Listo CI {ci} — revise Grabar en RUAT"
+                    except ContribuyenteYaRegistrado as ya:
+                        log.warning("CI ya registrado: %s", ya.mensaje)
+                        api.resultado(doc_id, "error_automatizacion", ya.mensaje[:500])
+                        status["text"] = f"CI {ci} ya registrado"
+                    except DatosOcrInvalidos as datos:
+                        log.warning("OCR inválido: %s", datos.mensaje)
+                        api.resultado(doc_id, "error_automatizacion", datos.mensaje[:500])
+                        status["text"] = f"OCR inválido CI {ci}"
+                    except Exception as exc:
+                        log.exception("Error automatizando %s", doc_id)
+                        msg = str(exc)
+                        if "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
+                            msg = (
+                                "Se perdio el control de Nightly. Cierre TODAS las ventanas Nightly, "
+                                "inicie solo Digitalizador Agent, espere la Nightly que abre el agente, "
+                                "inicie sesion RUAT ahi (no abra otra Nightly a mano) y vuelva a enviar."
+                            )
+                            try:
+                                automator.ensure_connected()
+                            except Exception as recon:
+                                log.error("No se pudo reconectar Firefox: %s", recon)
+                        try:
+                            api.resultado(doc_id, "error_automatizacion", msg[:500])
+                        except Exception as report_exc:
+                            log.error("No se pudo reportar error: %s", report_exc)
+                        status["text"] = f"Error CI {ci}"
+            except Exception as exc:
+                if stop.is_set():
+                    break
+                log.error("Error de ciclo: %s", exc)
+                status["text"] = "Error de conexión — reintentando…"
+                stop.wait(poll)
 
-    if not automator.dry_run:
-        automator.close()
+        try:
+            if not automator.dry_run:
+                automator.close()
+        except Exception:
+            pass
+        log.info("Worker detenido")
+
+    t = threading.Thread(target=worker, name="agent-worker", daemon=True)
+    t.start()
+
+    ico = resolve_data_file("DigitalizadorAgent.ico")
+    user_label = session.email or session.nombre or session.user_id or "—"
+
+    def on_quit() -> None:
+        stop.set()
+        status["text"] = "Saliendo…"
+
+    def on_logout() -> None:
+        session.clear()
+        log.info("Sesión cerrada por el usuario")
+
+    tray = TrayApp(
+        title="Digitalizador Agent",
+        status_fn=lambda: status["text"],
+        user_label=user_label,
+        log_path=log_path,
+        app_dir=base_path,
+        ico_path=ico if ico.exists() else None,
+        on_quit=on_quit,
+        on_logout=on_logout,
+    )
+    try:
+        tray.run()
+    finally:
+        stop.set()
+        t.join(timeout=8)
+
     return 0
 
 

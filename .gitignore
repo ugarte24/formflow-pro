@@ -30,6 +30,7 @@ service-account*.json
 agent/.venv/
 agent/.env
 agent/session.json
+agent/agent.log
 agent/downloads/
 agent/build/
 agent/dist/

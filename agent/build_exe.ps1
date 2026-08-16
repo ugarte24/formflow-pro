@@ -46,11 +46,11 @@ if not exist ".env" (
   pause
   exit /b 1
 )
-DigitalizadorAgent.exe
-pause
+start "" "DigitalizadorAgent.exe"
 "@ | Set-Content -Encoding ASCII (Join-Path $out "Iniciar-Agente.bat")
 
 Write-Host ""
 Write-Host "Listo: $out" -ForegroundColor Green
 Write-Host "Copie esa carpeta al PC del operador, cree .env (BASE_URL) y ejecute Iniciar-Agente.bat"
+Write-Host "El agente corre en la bandeja del sistema (sin ventana negra)."
 Write-Host "Al arrancar pedira email/contrasena (las mismas de la web)."

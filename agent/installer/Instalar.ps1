@@ -71,8 +71,7 @@ try {
     @(
       "@echo off"
       "cd /d `"%~dp0`""
-      "DigitalizadorAgent.exe"
-      "pause"
+      "start `"`" `"DigitalizadorAgent.exe`""
     ) | Set-Content -Encoding ASCII $bat
   }
 

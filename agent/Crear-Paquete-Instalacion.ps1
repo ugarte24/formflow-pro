@@ -35,7 +35,8 @@ Digitalizador Agent — Instalación
 1. Descomprimí este ZIP en cualquier carpeta (ej. Escritorio).
 2. Doble clic en Instalar.bat
 3. Al abrir Digitalizador Agent, inicie sesión con el mismo email/contraseña de la web.
-4. Usá el icono "Digitalizador Agent" del Escritorio.
+4. El programa queda en la bandeja del sistema (icono junto al reloj).
+5. Usá el icono "Digitalizador Agent" del Escritorio.
 
 No hace falta copiar carpetas a mano después de instalar.
 Para quitar el programa: Desinstalar.bat (o el de la carpeta instalada).

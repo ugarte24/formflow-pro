@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import getpass
 import json
 import logging
 import time
@@ -125,15 +124,17 @@ class AgentSession:
         raise RuntimeError("Sin sesión. Debe iniciar sesión.")
 
     def prompt_login(self) -> None:
-        print()
-        print("=== Digitalizador Agent — Iniciar sesión ===")
-        print("Use el mismo email y contraseña de la aplicación web.")
-        print()
-        email = input("Email: ").strip()
-        password = getpass.getpass("Contraseña: ")
-        if not email or not password:
-            raise RuntimeError("Email y contraseña son obligatorios")
-        self.login(email, password)
+        from tray_ui import prompt_credentials, show_error
+
+        creds = prompt_credentials()
+        if not creds:
+            raise RuntimeError("Inicio de sesión cancelado")
+        email, password = creds
+        try:
+            self.login(email, password)
+        except Exception as exc:
+            show_error("Digitalizador Agent", str(exc))
+            raise
 
 
 def ensure_logged_in(base_url: str, session_path: Path) -> AgentSession:

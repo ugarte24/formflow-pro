@@ -52,7 +52,7 @@ Ajuste selectores CSS/texto en `selectors.json` sin tocar Python.
 python main.py
 ```
 
-Al arrancar pedirá **email y contraseña** (las mismas de la web). La sesión se guarda en `session.json`.
+Al arrancar pedirá **email y contraseña** (las mismas de la web) en una ventana. Luego corre en la **bandeja del sistema** (sin consola negra). Clic derecho en el icono → Ver log / Salir. La sesión se guarda en `session.json`; el log en `agent.log`.
 
 Prueba de API sin tocar Firefox:
 
