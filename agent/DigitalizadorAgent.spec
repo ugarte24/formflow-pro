@@ -33,12 +33,22 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'PIL.AvifImagePlugin',
+        'PIL.WebPImagePlugin',
+        'PIL.ImageTk',
+        'PIL.ImageQt',
+        'PIL.PdfImagePlugin',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Quitar códecs Pillow grandes que no usamos (bajar tamaño del instalador).
+_DROP_PIL = ('_avif', '_webp', '_imagingft', '_imagingcms', '_imagingtk')
+a.binaries = [b for b in a.binaries if not any(tok in str(b[0]).lower() for tok in _DROP_PIL)]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
