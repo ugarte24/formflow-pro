@@ -1,4 +1,4 @@
-"""Digitalizador Agent — bandeja del sistema + polling RUAT."""
+"""Digitalizador Agent — ventana + bandeja + auto-actualización."""
 
 from __future__ import annotations
 
@@ -6,17 +6,18 @@ import logging
 import os
 import sys
 import threading
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from agent_ui import AgentWindow, run_startup_update
 from api_client import AgenteApi
 from app_paths import app_dir, is_frozen, resolve_data_file
 from ensure_browsers import ensure_playwright_firefox
 from ruat_flow import ContribuyenteYaRegistrado, DatosOcrInvalidos, RuatAutomator
 from session_auth import SESSION_NAME, ensure_logged_in
-from tray_ui import TrayApp, show_error
+from tray_ui import show_error
+from updater import local_version
 
 log = logging.getLogger("digitalizador-agent")
 
@@ -30,7 +31,6 @@ def setup_logging(log_path: Path) -> None:
     fh = logging.FileHandler(log_path, encoding="utf-8")
     fh.setFormatter(fmt)
     root.addHandler(fh)
-    # En desarrollo (no frozen) también a consola si hay
     if not is_frozen() and sys.stderr and hasattr(sys.stderr, "write"):
         sh = logging.StreamHandler(sys.stderr)
         sh.setFormatter(fmt)
@@ -62,6 +62,14 @@ def main() -> int:
         show_error("Digitalizador Agent", f"Configure BASE_URL en:\n{env_path}")
         return 1
 
+    # Auto-update al iniciar (antes de login / Firefox)
+    try:
+        if run_startup_update(base):
+            log.info("Saliendo para aplicar actualización…")
+            return 0
+    except Exception as exc:
+        log.warning("Auto-update omitido: %s", exc)
+
     dry = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
     if not dry:
         try:
@@ -87,12 +95,12 @@ def main() -> int:
     stop = threading.Event()
 
     log.info(
-        "Agente iniciado · %s · usuario=%s · poll=%ss · mode=%s · dir=%s",
+        "Agente iniciado · v%s · %s · usuario=%s · poll=%ss · mode=%s",
+        local_version(),
         base,
         session.email or session.user_id,
         poll,
         automator.mode,
-        base_path,
     )
     if automator.dry_run:
         log.warning("DRY_RUN activo: no interactúa con Firefox, solo reporta pendientes")
@@ -194,10 +202,10 @@ def main() -> int:
         session.clear()
         log.info("Sesión cerrada por el usuario")
 
-    tray = TrayApp(
-        title="Digitalizador Agent",
-        status_fn=lambda: status["text"],
+    win = AgentWindow(
+        base_url=base,
         user_label=user_label,
+        status_fn=lambda: status["text"],
         log_path=log_path,
         app_dir=base_path,
         ico_path=ico if ico.exists() else None,
@@ -205,7 +213,7 @@ def main() -> int:
         on_logout=on_logout,
     )
     try:
-        tray.run()
+        win.run()
     finally:
         stop.set()
         t.join(timeout=8)

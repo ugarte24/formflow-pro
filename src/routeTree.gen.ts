@@ -18,6 +18,7 @@ import { Route as AuthenticatedHistorialRouteImport } from './routes/_authentica
 import { Route as AuthenticatedInicioRouteImport } from './routes/_authenticated/inicio'
 import { Route as AuthenticatedPerfilRouteImport } from './routes/_authenticated/perfil'
 import { Route as AuthenticatedVerificarIdRouteImport } from './routes/_authenticated/verificar.$id'
+import { Route as ApiPublicAgenteActualizacionRouteImport } from './routes/api/public/agente/actualizacion'
 import { Route as ApiPublicAgenteLoginRouteImport } from './routes/api/public/agente/login'
 import { Route as ApiPublicAgentePendientesRouteImport } from './routes/api/public/agente/pendientes'
 import { Route as ApiPublicAgenteRefreshRouteImport } from './routes/api/public/agente/refresh'
@@ -68,6 +69,12 @@ const AuthenticatedVerificarIdRoute =
     path: '/verificar/$id',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const ApiPublicAgenteActualizacionRoute =
+  ApiPublicAgenteActualizacionRouteImport.update({
+    id: '/api/public/agente/actualizacion',
+    path: '/api/public/agente/actualizacion',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiPublicAgenteLoginRoute = ApiPublicAgenteLoginRouteImport.update({
   id: '/api/public/agente/login',
   path: '/api/public/agente/login',
@@ -100,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/inicio': typeof AuthenticatedInicioRoute
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/actualizacion': typeof ApiPublicAgenteActualizacionRoute
   '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
   '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
@@ -114,6 +122,7 @@ export interface FileRoutesByTo {
   '/inicio': typeof AuthenticatedInicioRoute
   '/perfil': typeof AuthenticatedPerfilRoute
   '/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/actualizacion': typeof ApiPublicAgenteActualizacionRoute
   '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
   '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
@@ -130,6 +139,7 @@ export interface FileRoutesById {
   '/_authenticated/inicio': typeof AuthenticatedInicioRoute
   '/_authenticated/perfil': typeof AuthenticatedPerfilRoute
   '/_authenticated/verificar/$id': typeof AuthenticatedVerificarIdRoute
+  '/api/public/agente/actualizacion': typeof ApiPublicAgenteActualizacionRoute
   '/api/public/agente/login': typeof ApiPublicAgenteLoginRoute
   '/api/public/agente/pendientes': typeof ApiPublicAgentePendientesRoute
   '/api/public/agente/refresh': typeof ApiPublicAgenteRefreshRoute
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
     | '/inicio'
     | '/perfil'
     | '/verificar/$id'
+    | '/api/public/agente/actualizacion'
     | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
     | '/api/public/agente/refresh'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/inicio'
     | '/perfil'
     | '/verificar/$id'
+    | '/api/public/agente/actualizacion'
     | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
     | '/api/public/agente/refresh'
@@ -175,6 +187,7 @@ export interface FileRouteTypes {
     | '/_authenticated/inicio'
     | '/_authenticated/perfil'
     | '/_authenticated/verificar/$id'
+    | '/api/public/agente/actualizacion'
     | '/api/public/agente/login'
     | '/api/public/agente/pendientes'
     | '/api/public/agente/refresh'
@@ -185,6 +198,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicAgenteActualizacionRoute: typeof ApiPublicAgenteActualizacionRoute
   ApiPublicAgenteLoginRoute: typeof ApiPublicAgenteLoginRoute
   ApiPublicAgentePendientesRoute: typeof ApiPublicAgentePendientesRoute
   ApiPublicAgenteRefreshRoute: typeof ApiPublicAgenteRefreshRoute
@@ -256,6 +270,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedVerificarIdRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/agente/actualizacion': {
+      id: '/api/public/agente/actualizacion'
+      path: '/api/public/agente/actualizacion'
+      fullPath: '/api/public/agente/actualizacion'
+      preLoaderRoute: typeof ApiPublicAgenteActualizacionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/agente/login': {
       id: '/api/public/agente/login'
       path: '/api/public/agente/login'
@@ -312,6 +333,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicAgenteActualizacionRoute: ApiPublicAgenteActualizacionRoute,
   ApiPublicAgenteLoginRoute: ApiPublicAgenteLoginRoute,
   ApiPublicAgentePendientesRoute: ApiPublicAgentePendientesRoute,
   ApiPublicAgenteRefreshRoute: ApiPublicAgenteRefreshRoute,

@@ -6,7 +6,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 log = logging.getLogger("digitalizador-agent")
 
@@ -141,6 +141,8 @@ class TrayApp:
         ico_path: Path | None,
         on_quit: Callable[[], None],
         on_logout: Callable[[], None] | None = None,
+        on_show: Callable | None = None,
+        on_update: Callable | None = None,
     ) -> None:
         self.title = title
         self.status_fn = status_fn
@@ -150,6 +152,8 @@ class TrayApp:
         self.ico_path = ico_path
         self.on_quit = on_quit
         self.on_logout = on_logout
+        self.on_show = on_show
+        self.on_update = on_update
         self._icon = None
         self._stop = threading.Event()
 
@@ -205,13 +209,16 @@ class TrayApp:
             except Exception:
                 return "Estado: —"
 
-        items = [
-            Item(lambda item: status_text(item), None, enabled=False),
-            Item(f"Usuario: {self.user_label}", None, enabled=False),
-            Item("Ver log", self._open_log),
-            Item("Abrir carpeta del agente", self._open_folder),
-            pystray.Menu.SEPARATOR,
-        ]
+        items = []
+        if self.on_show:
+            items.append(Item("Mostrar ventana", self.on_show))
+        items.append(Item(lambda item: status_text(item), None, enabled=False))
+        items.append(Item(f"Usuario: {self.user_label}", None, enabled=False))
+        if self.on_update:
+            items.append(Item("Actualizar", self.on_update))
+        items.append(Item("Ver log", self._open_log))
+        items.append(Item("Abrir carpeta del agente", self._open_folder))
+        items.append(pystray.Menu.SEPARATOR)
         if self.on_logout:
             items.append(Item("Cerrar sesión y salir", self._do_logout))
         items.append(Item("Salir", self._do_quit))
