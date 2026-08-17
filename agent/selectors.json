@@ -16,7 +16,7 @@
   "buscar": {
     "titulo": "REGISTRO CONTRIBUYENTE NATURAL - BUSCAR CONTRIBUYENTE",
     "label_documento": "Número Documento",
-    "input_documento": "input[type='text']",
+    "input_documento": "input[type='text'], input:not([type]), input[type=''], input[type='search']",
     "input_documento_index": 0,
     "input_complemento_index": 1,
     "completar_complemento": false,

@@ -822,6 +822,78 @@ class RuatAutomator:
             node = node[k]
         return node
 
+    def _input_texto_visible(self, scope, css: str, idx: int = 0):
+        """Primer(os) input(s) de texto visibles en página o iframe."""
+        loc = scope.locator(css)
+        visibles = []
+        try:
+            n = min(loc.count(), 12)
+        except Exception:
+            return None
+        for i in range(n):
+            el = loc.nth(i)
+            try:
+                if el.is_visible():
+                    visibles.append(el)
+            except Exception:
+                continue
+        if idx < len(visibles):
+            return visibles[idx]
+        return visibles[0] if visibles else None
+
+    def _localizar_campo_numero_documento(self, page: Page):
+        """
+        RUAT suele poner el formulario en un iframe y sin <label for=…>.
+        Busca en página + frames: label, fila con el texto, o 1.er input visible del form Buscar.
+        """
+        label_rx = re.compile(r"N[uú]mero\s+Documento", re.I)
+        css = str(
+            self._sel(
+                "buscar",
+                "input_documento",
+                default="input[type='text'], input:not([type]), input[type=''], input[type='search']",
+            )
+        )
+        idx = int(self._sel("buscar", "input_documento_index", default=0) or 0)
+
+        for scope in self._scopes(page):
+            # 1) get_by_label (si el HTML asocia bien)
+            try:
+                by_label = scope.get_by_label(label_rx)
+                if by_label.count():
+                    el = by_label.first
+                    if el.is_visible():
+                        return el
+            except Exception:
+                pass
+
+            # 2) Fila / bloque que contiene el texto del label → input dentro
+            try:
+                bloque = scope.locator("tr, div, td, li, fieldset, table").filter(has_text=label_rx)
+                n = min(bloque.count(), 6)
+                for i in range(n):
+                    el = self._input_texto_visible(bloque.nth(i), css, idx)
+                    if el is not None:
+                        return el
+            except Exception:
+                pass
+
+            # 3) Scope que ya muestra «BUSCAR CONTRIBUYENTE» → N-ésimo input visible
+            try:
+                if scope.get_by_text(re.compile(r"BUSCAR\s+CONTRIBUYENTE", re.I)).count():
+                    el = self._input_texto_visible(scope, css, idx)
+                    if el is not None:
+                        return el
+            except Exception:
+                pass
+
+        # 4) Último recurso: cualquier input texto visible en algún frame
+        for scope in self._scopes(page):
+            el = self._input_texto_visible(scope, css, idx)
+            if el is not None:
+                return el
+        return None
+
     def _buscar_contribuyente(self, page: Page, doc: dict) -> None:
         page = self._esperar_ui(self._ya_en_buscar_contribuyente, timeout_ms=12000, desc="formulario Buscar")
         numero = (doc.get("numero_documento") or "").split("-")[0].strip()
@@ -829,55 +901,83 @@ class RuatAutomator:
             raise RuntimeError("numero_documento vacío")
 
         # Número Documento: caja grande; complemento (después del "-") se deja vacío
-        label_doc = self._sel("buscar", "label_documento", default="Número Documento")
-        filled = False
+        campo = self._localizar_campo_numero_documento(page)
+        if campo is None:
+            raise RuntimeError(
+                "No encontré el campo Número Documento en Buscar Contribuyente. "
+                "Deje abierta esa pantalla (con el cuadro Criterios Búsqueda) y vuelva a enviar."
+            )
         try:
-            by_label = page.get_by_label(re.compile(str(label_doc), re.I))
-            if by_label.count():
-                by_label.first.fill(numero)
-                filled = True
-        except Exception:
-            pass
-        if not filled:
-            css = self._sel("buscar", "input_documento", default="input[type='text']")
-            idx = int(self._sel("buscar", "input_documento_index", default=0) or 0)
-            campo = page.locator(str(css)).nth(idx)
-            try:
-                campo.wait_for(state="visible", timeout=15000)
-            except Exception as exc:
-                raise RuntimeError(
-                    "No encontré el formulario Buscar Contribuyente en esta ventana. "
-                    "Abra Registro Contribuyente Natural y vuelva a enviar."
-                ) from exc
+            campo.click(timeout=5000)
+            campo.fill("")
             campo.fill(numero)
+            log.info("Número Documento rellenado (%s)", numero)
+        except Exception as exc:
+            raise RuntimeError(
+                "Vi la pantalla Buscar Contribuyente pero no pude escribir el CI. "
+                "Vuelva a enviar; si persiste, reinicie el agente."
+            ) from exc
 
         # Tipo Documento = CEDULA DE IDENTIDAD (suele venir ya seleccionado)
         tipo_label = self._sel("buscar", "tipo_documento_label", default="CEDULA DE IDENTIDAD")
         label_tipo = self._sel("buscar", "label_tipo_documento", default="Tipo Documento")
-        tipo = page.get_by_label(re.compile(str(label_tipo), re.I))
-        if tipo.count() == 0:
-            tipo = page.locator("select").filter(has_text=re.compile(r"CEDULA|IDENTIDAD", re.I))
-        if tipo.count():
-            try:
-                tipo.first.select_option(label=re.compile(str(tipo_label), re.I))
-            except Exception:
-                log.warning("No se pudo fijar tipo documento %s (puede ya estar seleccionado)", tipo_label)
+        tipo_ok = False
+        for scope in self._scopes(page):
+            tipo = scope.get_by_label(re.compile(str(label_tipo), re.I))
+            if tipo.count() == 0:
+                tipo = scope.locator("select").filter(has_text=re.compile(r"CEDULA|IDENTIDAD", re.I))
+            if tipo.count():
+                try:
+                    tipo.first.select_option(label=re.compile(str(tipo_label), re.I))
+                except Exception:
+                    pass
+                tipo_ok = True
+                break
+        if not tipo_ok:
+            log.warning("No se pudo fijar tipo documento %s (puede ya estar seleccionado)", tipo_label)
 
         # Departamento Expedido → opción en blanco (regla fija Riberalta/RUAT)
         label_depto = self._sel("buscar", "label_departamento", default="Departamento Expedido")
-        depto = page.get_by_label(re.compile(str(label_depto), re.I))
-        if depto.count() == 0:
-            depto = page.locator("select").nth(1)
-        if depto.count():
+        depto_ok = False
+        for scope in self._scopes(page):
+            depto = scope.get_by_label(re.compile(str(label_depto), re.I))
+            if depto.count() == 0:
+                sels = scope.locator("select")
+                try:
+                    nsel = sels.count()
+                except Exception:
+                    nsel = 0
+                if nsel >= 2:
+                    depto = sels.nth(1)
+                elif nsel == 1:
+                    depto = sels.first
+                else:
+                    continue
             try:
-                # Preferir valor vacío / primera opción en blanco
-                depto.first.select_option(index=0)
+                target = depto.first if hasattr(depto, "first") and depto.count() else depto
+                target.select_option(index=0)
                 log.info("Departamento Expedido dejado en blanco (índice 0)")
+                depto_ok = True
+                break
             except Exception:
-                log.warning("No se pudo forzar Departamento Expedido en blanco")
+                continue
+        if not depto_ok:
+            log.warning("No se pudo forzar Departamento Expedido en blanco")
 
         btn = self._sel("buscar", "boton_buscar", default="^Buscar$")
-        page.get_by_role("button", name=re.compile(str(btn), re.I)).click()
+        clicked = self._click_por_nombre(page, str(btn))
+        if not clicked:
+            for scope in self._scopes(page):
+                try:
+                    b = scope.get_by_role("button", name=re.compile(str(btn), re.I))
+                    if b.count():
+                        b.first.click()
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+        if not clicked:
+            raise RuntimeError("No encontré el botón Buscar en el formulario.")
         page.wait_for_timeout(1000)
 
     def _validar_datos_ocr(self, doc: dict) -> None:
