@@ -893,82 +893,253 @@ class RuatAutomator:
             return visibles[idx]
         return visibles[0] if visibles else None
 
+    def _escribir_en_input(self, campo, valor: str, page: Page) -> bool:
+        """Rellena un input RUAT (fill suele fallar en JSP antiguos). Verifica el valor."""
+        strategies = []
+
+        def via_fill() -> None:
+            campo.click(timeout=3000, force=True)
+            campo.fill("", force=True, timeout=3000)
+            campo.fill(valor, force=True, timeout=5000)
+
+        def via_type() -> None:
+            campo.click(timeout=3000, force=True)
+            try:
+                campo.press("Control+a", timeout=2000)
+            except Exception:
+                pass
+            try:
+                campo.press("Backspace", timeout=2000)
+            except Exception:
+                pass
+            # press_sequentially dispara keydown/keypress/keyup (RUAT lo necesita)
+            campo.press_sequentially(valor, delay=40, timeout=15000)
+
+        def via_js() -> None:
+            campo.evaluate(
+                """(el, v) => {
+                    el.focus();
+                    el.select && el.select();
+                    el.value = '';
+                    el.value = v;
+                    for (const ev of ['input', 'change', 'blur', 'keyup']) {
+                      el.dispatchEvent(new Event(ev, { bubbles: true }));
+                    }
+                }""",
+                valor,
+            )
+
+        strategies.extend([("fill", via_fill), ("type", via_type), ("js", via_js)])
+
+        for name, fn in strategies:
+            try:
+                fn()
+                time.sleep(0.15)
+                try:
+                    actual = (campo.input_value(timeout=2000) or "").strip()
+                except Exception:
+                    actual = ""
+                if actual == valor or actual.replace(" ", "") == valor:
+                    log.info("CI escrito con estrategia «%s» → %r", name, actual)
+                    return True
+                log.warning("Estrategia «%s»: valor quedó %r (esperado %r)", name, actual, valor)
+            except Exception as exc:
+                log.warning("Estrategia «%s» falló: %s", name, exc)
+
+        # Último recurso: teclado a nivel página (el campo ya debería tener foco)
+        try:
+            campo.click(timeout=3000, force=True)
+            page.keyboard.type(valor, delay=50)
+            time.sleep(0.2)
+            actual = (campo.input_value(timeout=2000) or "").strip()
+            if actual == valor or valor in actual:
+                log.info("CI escrito con keyboard.type → %r", actual)
+                return True
+        except Exception as exc:
+            log.warning("keyboard.type falló: %s", exc)
+        return False
+
+    def _rellenar_ci_en_frames(self, page: Page, numero: str) -> bool:
+        """Busca el input Número Documento en cada frame y lo setea por JS (más fiable en RUAT)."""
+        js = """
+        (numero) => {
+          const okType = (t) => {
+            t = (t || 'text').toLowerCase();
+            return t === 'text' || t === '' || t === 'search' || t === 'tel' || t === 'number';
+          };
+          const visible = (el) => !!(el && el.offsetParent !== null && el.disabled !== true);
+          const body = (document.body && document.body.innerText || '').toLowerCase();
+          const enForm =
+            body.includes('buscar contribuyente') ||
+            body.includes('criterios') ||
+            body.includes('número documento') ||
+            body.includes('numero documento');
+          if (!enForm) return { ok: false, reason: 'no-form' };
+
+          const inputs = Array.from(document.querySelectorAll('input')).filter(
+            (inp) => okType(inp.type) && visible(inp)
+          );
+          let target = null;
+          for (const inp of inputs) {
+            const row = inp.closest('tr') || inp.parentElement;
+            const txt = ((row && row.innerText) || '').toLowerCase();
+            if (txt.includes('numero documento') || txt.includes('número documento')) {
+              const rowIns = Array.from(row.querySelectorAll('input')).filter(
+                (i) => okType(i.type) && visible(i)
+              );
+              // Caja grande del CI = primera de la fila (la chica es complemento)
+              target = rowIns[0] || inp;
+              break;
+            }
+          }
+          if (!target) {
+            // Sección criterios: primer input de texto
+            const criterios = Array.from(document.querySelectorAll('table, fieldset, div')).find((n) =>
+              /criterios\\s*b[uú]squeda/i.test(n.innerText || '')
+            );
+            if (criterios) {
+              const ins = Array.from(criterios.querySelectorAll('input')).filter(
+                (i) => okType(i.type) && visible(i)
+              );
+              target = ins[0] || null;
+            }
+          }
+          if (!target && inputs.length) target = inputs[0];
+          if (!target) return { ok: false, reason: 'no-input', n: inputs.length };
+
+          target.focus();
+          target.value = numero;
+          for (const ev of ['focus', 'input', 'keydown', 'keyup', 'change']) {
+            try { target.dispatchEvent(new Event(ev, { bubbles: true })); } catch (e) {}
+          }
+          return {
+            ok: true,
+            value: target.value,
+            name: target.name || '',
+            id: target.id || '',
+          };
+        }
+        """
+        for scope in self._scopes(page):
+            try:
+                # Frame/Page.evaluate
+                res = scope.evaluate(js, numero)
+            except Exception as exc:
+                log.debug("evaluate CI en scope: %s", exc)
+                continue
+            if not isinstance(res, dict):
+                continue
+            if res.get("ok") and str(res.get("value") or "").strip() == numero:
+                log.info(
+                    "CI por JS en frame · name=%s id=%s",
+                    res.get("name"),
+                    res.get("id"),
+                )
+                return True
+            if res.get("ok"):
+                log.warning("JS setéó pero value=%r", res.get("value"))
+        return False
+
     def _localizar_campo_numero_documento(self, page: Page):
         """
-        RUAT suele poner el formulario en un iframe y sin <label for=…>.
-        Busca en página + frames: label, fila con el texto, o 1.er input visible del form Buscar.
+        Localiza la caja grande de Número Documento (no el complemento).
+        Prioriza la fila del label dentro de Criterios / BUSCAR CONTRIBUYENTE.
         """
         label_rx = re.compile(r"N[uú]mero\s+Documento", re.I)
-        css = str(
-            self._sel(
-                "buscar",
-                "input_documento",
-                default="input[type='text'], input:not([type]), input[type=''], input[type='search']",
-            )
+        css = (
+            "input[type='text'], input:not([type]), input[type=''], "
+            "input[type='search'], input[type='tel'], input[type='number']"
         )
-        idx = int(self._sel("buscar", "input_documento_index", default=0) or 0)
+        css = str(self._sel("buscar", "input_documento", default=css))
+
+        candidatos: list = []
 
         for scope in self._scopes(page):
-            # 1) get_by_label (si el HTML asocia bien)
+            # A) Fila que contiene el label → primer input de esa fila
             try:
-                by_label = scope.get_by_label(label_rx)
-                if by_label.count():
-                    el = by_label.first
-                    if el.is_visible():
-                        return el
-            except Exception:
-                pass
-
-            # 2) Fila / bloque que contiene el texto del label → input dentro
-            try:
-                bloque = scope.locator("tr, div, td, li, fieldset, table").filter(has_text=label_rx)
-                n = min(bloque.count(), 6)
+                filas = scope.locator("tr").filter(has_text=label_rx)
+                n = min(filas.count(), 4)
                 for i in range(n):
-                    el = self._input_texto_visible(bloque.nth(i), css, idx)
-                    if el is not None:
-                        return el
+                    fila = filas.nth(i)
+                    ins = fila.locator(css)
+                    if ins.count() >= 1 and ins.first.is_visible():
+                        candidatos.append(ins.first)
+                        break
             except Exception:
                 pass
 
-            # 3) Scope que ya muestra «BUSCAR CONTRIBUYENTE» → N-ésimo input visible
+            # B) Bloque Criterios Búsqueda
+            try:
+                bloque = scope.locator("table, fieldset, div").filter(
+                    has_text=re.compile(r"Criterios\s+B[uú]squeda", re.I)
+                )
+                if bloque.count():
+                    el = self._input_texto_visible(bloque.first, css, 0)
+                    if el is not None:
+                        candidatos.append(el)
+            except Exception:
+                pass
+
+            # C) Scope con título BUSCAR CONTRIBUYENTE
             try:
                 if scope.get_by_text(re.compile(r"BUSCAR\s+CONTRIBUYENTE", re.I)).count():
-                    el = self._input_texto_visible(scope, css, idx)
+                    el = self._input_texto_visible(scope, css, 0)
                     if el is not None:
-                        return el
+                        candidatos.append(el)
             except Exception:
                 pass
 
-        # 4) Último recurso: cualquier input texto visible en algún frame
-        for scope in self._scopes(page):
-            el = self._input_texto_visible(scope, css, idx)
-            if el is not None:
-                return el
-        return None
+            # D) name/id típicos Struts/JSP
+            for sel in (
+                "input[name*='documento' i]",
+                "input[name*='Documento' i]",
+                "input[id*='documento' i]",
+                "input[name*='nroDoc' i]",
+                "input[name*='numDoc' i]",
+            ):
+                try:
+                    loc = scope.locator(sel)
+                    if loc.count() and loc.first.is_visible():
+                        candidatos.append(loc.first)
+                except Exception:
+                    continue
+
+        # Log de ayuda
+        try:
+            log.info("Candidatos Número Documento: %s", len(candidatos))
+        except Exception:
+            pass
+
+        return candidatos[0] if candidatos else None
 
     def _buscar_contribuyente(self, page: Page, doc: dict) -> None:
         page = self._esperar_ui(self._ya_en_buscar_contribuyente, timeout_ms=12000, desc="formulario Buscar")
+        page = self._page_activa()
         numero = (doc.get("numero_documento") or "").split("-")[0].strip()
+        numero = re.sub(r"\D", "", numero) or numero
         if not numero:
             raise RuntimeError("numero_documento vacío")
 
-        # Número Documento: caja grande; complemento (después del "-") se deja vacío
-        campo = self._localizar_campo_numero_documento(page)
-        if campo is None:
+        log.info("Rellenando Número Documento = %s", numero)
+
+        # 1) JS directo en frames (más fiable en RUAT/JSP)
+        escrito = self._rellenar_ci_en_frames(page, numero)
+
+        # 2) Locator Playwright + fill/type/js
+        if not escrito:
+            campo = self._localizar_campo_numero_documento(page)
+            if campo is None:
+                raise RuntimeError(
+                    "No encontré el campo Número Documento en Buscar Contribuyente. "
+                    "Deje abierta esa pantalla (con el cuadro Criterios Búsqueda) y vuelva a enviar."
+                )
+            escrito = self._escribir_en_input(campo, numero, page)
+
+        if not escrito:
             raise RuntimeError(
-                "No encontré el campo Número Documento en Buscar Contribuyente. "
-                "Deje abierta esa pantalla (con el cuadro Criterios Búsqueda) y vuelva a enviar."
+                f"El campo Número Documento no aceptó el CI ({numero}). "
+                "Haga clic en el campo, reinicie el agente (v1.3.9+) y vuelva a enviar."
             )
-        try:
-            campo.click(timeout=5000)
-            campo.fill("")
-            campo.fill(numero)
-            log.info("Número Documento rellenado (%s)", numero)
-        except Exception as exc:
-            raise RuntimeError(
-                "Vi la pantalla Buscar Contribuyente pero no pude escribir el CI. "
-                "Vuelva a enviar; si persiste, reinicie el agente."
-            ) from exc
 
         # Tipo Documento = CEDULA DE IDENTIDAD (suele venir ya seleccionado)
         tipo_label = self._sel("buscar", "tipo_documento_label", default="CEDULA DE IDENTIDAD")
@@ -980,7 +1151,7 @@ class RuatAutomator:
                 tipo = scope.locator("select").filter(has_text=re.compile(r"CEDULA|IDENTIDAD", re.I))
             if tipo.count():
                 try:
-                    tipo.first.select_option(label=re.compile(str(tipo_label), re.I))
+                    tipo.first.select_option(label=re.compile(str(tipo_label), re.I), timeout=5000)
                 except Exception:
                     pass
                 tipo_ok = True
@@ -1007,7 +1178,7 @@ class RuatAutomator:
                     continue
             try:
                 target = depto.first if hasattr(depto, "first") and depto.count() else depto
-                target.select_option(index=0)
+                target.select_option(index=0, timeout=5000)
                 log.info("Departamento Expedido dejado en blanco (índice 0)")
                 depto_ok = True
                 break
@@ -1017,20 +1188,33 @@ class RuatAutomator:
             log.warning("No se pudo forzar Departamento Expedido en blanco")
 
         btn = self._sel("buscar", "boton_buscar", default="^Buscar$")
-        clicked = self._click_por_nombre(page, str(btn))
+        clicked = False
+        # Evitar «Búsqueda Avanzada»: solo botón exacto Buscar
+        for scope in self._scopes(page):
+            try:
+                b = scope.get_by_role("button", name=re.compile(r"^Buscar$", re.I))
+                if b.count():
+                    b.first.click(timeout=8000, force=True)
+                    clicked = True
+                    break
+            except Exception:
+                continue
+            try:
+                b = scope.locator("input[type='submit'], input[type='button'], button").filter(
+                    has_text=re.compile(r"^Buscar$", re.I)
+                )
+                if b.count():
+                    b.first.click(timeout=8000, force=True)
+                    clicked = True
+                    break
+            except Exception:
+                continue
         if not clicked:
-            for scope in self._scopes(page):
-                try:
-                    b = scope.get_by_role("button", name=re.compile(str(btn), re.I))
-                    if b.count():
-                        b.first.click()
-                        clicked = True
-                        break
-                except Exception:
-                    continue
+            clicked = self._click_por_nombre(page, str(btn))
         if not clicked:
             raise RuntimeError("No encontré el botón Buscar en el formulario.")
-        page.wait_for_timeout(1000)
+        log.info("Clic en Buscar OK")
+        page.wait_for_timeout(1200)
 
     def _validar_datos_ocr(self, doc: dict) -> None:
         """Género, estado civil y fecha: si faltan o son raros → avisar al operador."""
