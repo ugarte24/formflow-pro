@@ -66,7 +66,8 @@ def main() -> int:
     try:
         if run_startup_update(base):
             log.info("Saliendo para aplicar actualización…")
-            return 0
+            # Salida forzada para no bloquear el .bat de copia/reinicio
+            os._exit(0)
     except Exception as exc:
         log.warning("Auto-update omitido: %s", exc)
 

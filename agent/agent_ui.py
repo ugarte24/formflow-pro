@@ -210,8 +210,21 @@ class AgentWindow:
         threading.Thread(target=work, daemon=True).start()
 
     def _quit_for_update(self) -> None:
+        """Salida inmediata tras lanzar el updater (no esperar Playwright/worker)."""
         self._set_update_msg("Instalando y reiniciando…")
-        self._quit()
+        try:
+            self.on_quit()
+        except Exception:
+            pass
+        try:
+            self.tray.request_stop()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     def _open_log(self) -> None:
         try:

@@ -127,8 +127,9 @@ def apply_update_and_restart(
     progress: ProgressCb | None = None,
 ) -> None:
     """
-    Lanza un .bat externo que reemplaza archivos cuando este proceso ya salió,
-    conserva .env / session.json / agent.log y reinicia el agente.
+    Lanza un .bat externo (vía WScript, independiente del proceso actual) que
+    reemplaza archivos cuando este proceso ya salió, conserva .env / session.json /
+    agent.log y reinicia el agente.
     """
     if not is_frozen():
         raise RuntimeError("La auto-actualización solo aplica al .exe instalado")
@@ -146,61 +147,108 @@ def apply_update_and_restart(
 
     report("Preparando reinicio…")
     pid = os.getpid()
-    bat = Path(tempfile.gettempdir()) / f"digitalizador-apply-update-{pid}.bat"
+    tmp = Path(tempfile.gettempdir())
+    bat = tmp / f"digitalizador-apply-update-{pid}.bat"
+    vbs = tmp / f"digitalizador-apply-update-{pid}.vbs"
+    log_file = tmp / "digitalizador-update.log"
     # Conservar configuración
     preserve = [".env", "session.json", "agent.log"]
 
+    # Rutas con barras invertidas para cmd; comillas dobles escapadas en VBS
+    dest_s = str(dest)
+    src_s = str(payload_root)
+    log_s = str(log_file)
+
     lines = [
         "@echo off",
-        "setlocal",
-        f"set DEST={dest}",
-        f"set SRC={payload_root}",
-        f"set PID={pid}",
-        "echo Esperando cierre del agente...",
+        "setlocal EnableExtensions",
+        f'set "DEST={dest_s}"',
+        f'set "SRC={src_s}"',
+        f'set "PID={pid}"',
+        f'set "UPDLOG={log_s}"',
+        'echo [%date% %time%] Inicio update PID=%PID% > "%UPDLOG%"',
+        'echo DEST=%DEST%>> "%UPDLOG%"',
+        'echo SRC=%SRC%>> "%UPDLOG%"',
+        'echo Esperando cierre del agente...>> "%UPDLOG%"',
         ":wait",
-        "tasklist /FI \"PID eq %PID%\" 2>NUL | find \"%PID%\" >NUL",
+        'tasklist /FI "PID eq %PID%" 2>NUL | find "%PID%" >NUL',
         "if not errorlevel 1 (",
         "  timeout /t 1 /nobreak >NUL",
         "  goto wait",
         ")",
+        'echo Proceso principal cerrado.>> "%UPDLOG%"',
         "taskkill /F /IM DigitalizadorAgent.exe >NUL 2>&1",
-        "timeout /t 2 /nobreak >NUL",
-        "echo Copiando archivos nuevos...",
+        "timeout /t 3 /nobreak >NUL",
+        'echo Copiando archivos nuevos...>> "%UPDLOG%"',
     ]
     for name in preserve:
-        lines.append(f'if exist "%DEST%\\{name}" copy /Y "%DEST%\\{name}" "%TEMP%\\dig-keep-{name}" >NUL')
+        lines.append(
+            f'if exist "%DEST%\\{name}" copy /Y "%DEST%\\{name}" "%TEMP%\\dig-keep-{name}" >NUL'
+        )
 
     lines += [
-        'robocopy "%SRC%" "%DEST%" /E /IS /IT /NFL /NDL /NJH /NJS /nc /ns /np >NUL',
-        "if errorlevel 8 exit /b 1",
+        'robocopy "%SRC%" "%DEST%" /E /IS /IT /R:8 /W:2 /NFL /NDL /NJH /NJS /nc /ns /np >> "%UPDLOG%" 2>&1',
+        "set RC=%ERRORLEVEL%",
+        'echo robocopy RC=%RC%>> "%UPDLOG%"',
+        "if %RC% GEQ 8 (",
+        '  echo ERROR: robocopy fallo>> "%UPDLOG%"',
+        "  exit /b 1",
+        ")",
     ]
-    # Restaurar config local (no pisar con la del paquete)
     for name in preserve:
         lines.append(
             f'if exist "%TEMP%\\dig-keep-{name}" copy /Y "%TEMP%\\dig-keep-{name}" "%DEST%\\{name}" >NUL'
         )
 
     lines += [
-        f'start "" "%DEST%\\{exe_name}"',
+        f'if not exist "%DEST%\\{exe_name}" (',
+        f'  echo ERROR: falta {exe_name} en DEST>> "%UPDLOG%"',
+        "  exit /b 1",
+        ")",
+        "timeout /t 1 /nobreak >NUL",
+        'echo Reiniciando agente...>> "%UPDLOG%"',
+        f'start "" /D "%DEST%" "%DEST%\\{exe_name}"',
+        'echo Listo.>> "%UPDLOG%"',
         "endlocal",
-        f'del "%~f0"',
+        'del "%~f0" >NUL 2>&1',
     ]
     bat.write_text("\r\n".join(lines) + "\r\n", encoding="ascii", errors="replace")
 
+    # WScript.Run(..., 0, False) = oculto y sin esperar: sobrevive al cierre del agente
+    # (CREATE_NO_WINDOW|DETACHED_PROCESS a menudo muere con el job del .exe).
+    # En VBS, "" dentro de un string es una comilla literal → cmd /c "ruta\al.bat"
+    vbs.write_text(
+        "\r\n".join(
+            [
+                'Set sh = CreateObject("WScript.Shell")',
+                # VBS: "" = comilla; resultado → cmd.exe /c "ruta\al.bat"
+                f'sh.Run "cmd.exe /c ""{bat}""", 0, False',
+            ]
+        )
+        + "\r\n",
+        encoding="ascii",
+        errors="replace",
+    )
+
     creationflags = 0
     if sys.platform == "win32":
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(
-            subprocess, "DETACHED_PROCESS", 0x00000008
+        creationflags = (
+            getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            | 0x00000200  # CREATE_NEW_PROCESS_GROUP
+            | 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
         )
 
     subprocess.Popen(
-        ["cmd.exe", "/c", str(bat)],
-        cwd=str(dest),
-        close_fds=True,
+        ["wscript.exe", "//B", "//Nologo", str(vbs)],
+        cwd=str(tmp),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=False,
         creationflags=creationflags,
     )
-    # Dar tiempo a que arranque el bat
-    time.sleep(0.4)
+    log.info("Script de actualización lanzado (%s); log=%s", bat, log_file)
+    time.sleep(0.6)
 
 
 def check_and_update(
