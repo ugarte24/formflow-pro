@@ -1393,33 +1393,197 @@ class RuatAutomator:
         hits = sum(1 for t in tokens if t in candidato)
         return hits / len(tokens)
 
-    def _recepcionar_documentacion(self, page: Page) -> None:
-        check_txt = self._sel("recepcion", "check_documento", default="DOCUMENTO DE IDENTIDAD")
-        # Preferir checkbox asociado al texto DOCUMENTO DE IDENTIDAD
-        row = page.get_by_text(re.compile(str(check_txt), re.I))
-        if row.count():
-            # Si es label, clic; si hay checkbox cerca, marcarlo
+    def _marcar_checkbox_por_texto(self, page: Page, texto: str, *, marcar: bool = True) -> bool:
+        """Marca/desmarca checkbox junto a un texto (página + iframes). RUAT suele usar frames."""
+        label_rx = re.compile(re.escape(texto), re.I)
+        js = """
+        ([texto, marcar]) => {
+          const body = (document.body && document.body.innerText || '').toLowerCase();
+          if (!body.includes(texto.toLowerCase())) return { ok: false, reason: 'no-text' };
+          const inputs = Array.from(document.querySelectorAll('input[type=checkbox]'));
+          let target = null;
+          for (const cb of inputs) {
+            const row = cb.closest('tr') || cb.closest('label') || cb.parentElement;
+            const txt = ((row && row.innerText) || '').toLowerCase();
+            if (txt.includes(texto.toLowerCase())) {
+              // Evitar coincidir solo por "documento" genérico si hay varios:
+              // preferir fila que contenga el texto completo
+              target = cb;
+              if (txt.includes('documento de identidad') || texto.toLowerCase().includes('identidad')) {
+                break;
+              }
+            }
+          }
+          if (!target) {
+            // label[for] / texto hermano
+            const labels = Array.from(document.querySelectorAll('label, td, span, div'));
+            for (const lab of labels) {
+              const t = (lab.innerText || '').trim().toLowerCase();
+              if (!t.includes(texto.toLowerCase())) continue;
+              const inLab = lab.querySelector('input[type=checkbox]');
+              if (inLab) { target = inLab; break; }
+              const prev = lab.previousElementSibling;
+              if (prev && prev.matches && prev.matches('input[type=checkbox]')) { target = prev; break; }
+              const next = lab.nextElementSibling;
+              if (next && next.matches && next.matches('input[type=checkbox]')) { target = next; break; }
+            }
+          }
+          if (!target) return { ok: false, reason: 'no-cb', n: inputs.length };
+          target.focus();
+          target.checked = !!marcar;
+          target.dispatchEvent(new Event('click', { bubbles: true }));
+          target.dispatchEvent(new Event('change', { bubbles: true }));
+          return { ok: true, checked: !!target.checked, name: target.name || '', id: target.id || '' };
+        }
+        """
+        for scope in self._scopes(page):
             try:
-                cb = page.locator("input[type='checkbox']").first
-                # Buscar checkbox en la misma fila que el texto
-                near = page.locator(
-                    f"xpath=//*[contains(translate(., 'identidad', 'IDENTIDAD'), 'DOCUMENTO DE IDENTIDAD')]/ancestor::tr[1]//input[@type='checkbox'] | //label[contains(., 'DOCUMENTO DE IDENTIDAD')]//input[@type='checkbox']"
-                )
-                if near.count():
-                    if not near.first.is_checked():
-                        near.first.check(force=True)
-                else:
-                    row.first.click()
+                res = scope.evaluate(js, [texto, marcar])
+                if isinstance(res, dict) and res.get("ok"):
+                    wanted = bool(marcar)
+                    if bool(res.get("checked")) == wanted:
+                        log.info(
+                            "Checkbox «%s» → %s (js name=%s id=%s)",
+                            texto,
+                            "ON" if wanted else "OFF",
+                            res.get("name"),
+                            res.get("id"),
+                        )
+                        return True
+            except Exception as exc:
+                log.debug("JS checkbox %s: %s", texto, exc)
+
+            # Playwright: fila con el texto → checkbox
+            try:
+                filas = scope.locator("tr, label, li, div").filter(has_text=label_rx)
+                n = min(filas.count(), 8)
+                for i in range(n):
+                    fila = filas.nth(i)
+                    cbs = fila.locator("input[type='checkbox']")
+                    if not cbs.count():
+                        continue
+                    cb = cbs.first
+                    if not cb.is_visible():
+                        continue
+                    # Evitar filas enormes que contienen todo el formulario
+                    try:
+                        txt = (fila.inner_text(timeout=800) or "").strip()
+                        if len(txt) > 120:
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        if marcar:
+                            if not cb.is_checked():
+                                cb.check(force=True, timeout=5000)
+                        else:
+                            if cb.is_checked():
+                                cb.uncheck(force=True, timeout=5000)
+                        log.info("Checkbox «%s» → %s (playwright)", texto, "ON" if marcar else "OFF")
+                        return True
+                    except Exception:
+                        try:
+                            cb.click(force=True, timeout=5000)
+                            log.info("Checkbox «%s» clic (playwright)", texto)
+                            return True
+                        except Exception:
+                            continue
             except Exception:
-                row.first.click()
-        # No marcar PODER / FACTURA; no usar Registrar tramitador (Gestor Trámite eliminado)
+                continue
+
+            # get_by_label / role
+            try:
+                loc = scope.get_by_label(label_rx)
+                if loc.count():
+                    el = loc.first
+                    if marcar and not el.is_checked():
+                        el.check(force=True, timeout=5000)
+                    elif not marcar and el.is_checked():
+                        el.uncheck(force=True, timeout=5000)
+                    return True
+            except Exception:
+                pass
+            try:
+                loc = scope.get_by_role("checkbox", name=label_rx)
+                if loc.count():
+                    el = loc.first
+                    if marcar and not el.is_checked():
+                        el.check(force=True, timeout=5000)
+                    elif not marcar and el.is_checked():
+                        el.uncheck(force=True, timeout=5000)
+                    return True
+            except Exception:
+                pass
+
+        return False
+
+    def _click_boton_en_scopes(self, page: Page, nombre_rx: str) -> bool:
+        pat = re.compile(str(nombre_rx), re.I)
+        for scope in self._scopes(page):
+            for role in ("button", "link"):
+                try:
+                    b = scope.get_by_role(role, name=pat)
+                    if b.count():
+                        b.first.click(timeout=8000, force=True)
+                        return True
+                except Exception:
+                    continue
+            try:
+                b = scope.locator(
+                    "input[type='submit'], input[type='button'], button, a"
+                ).filter(has_text=pat)
+                if b.count():
+                    b.first.click(timeout=8000, force=True)
+                    return True
+            except Exception:
+                continue
+        return self._click_por_nombre(page, nombre_rx)
+
+    def _recepcionar_documentacion(self, page: Page) -> None:
+        page = self._page_activa()
+        # Esperar pantalla de recepción (puede estar en iframe)
+        try:
+            page = self._esperar_ui(
+                lambda p: "recepcionar" in self.identificar_pantalla(p)
+                or "documento de identidad" in self._page_text(p),
+                timeout_ms=15000,
+                desc="Recepcionar Documentación",
+            )
+        except Exception:
+            page = self._page_activa()
+
+        check_txt = str(self._sel("recepcion", "check_documento", default="DOCUMENTO DE IDENTIDAD"))
+        log.info("Recepcionar: marcar «%s»", check_txt)
+
+        ok = self._marcar_checkbox_por_texto(page, check_txt, marcar=True)
+        if not ok:
+            # Variantes de texto (asterisco / mayúsculas)
+            for alt in (
+                "DOCUMENTO DE IDENTIDAD",
+                "*DOCUMENTO DE IDENTIDAD",
+                "Documento de Identidad",
+            ):
+                if self._marcar_checkbox_por_texto(page, alt, marcar=True):
+                    ok = True
+                    break
+        if not ok:
+            raise RuntimeError(
+                "No pude marcar el check DOCUMENTO DE IDENTIDAD en Recepcionar Documentación. "
+                "Deje esa pantalla visible y vuelva a enviar."
+            )
+
+        # Asegurar que PODER / FACTURA queden sin marcar
+        for no in self._sel("recepcion", "no_marcar", default=["PODER", "FACTURA LUZ/AGUA"]) or []:
+            try:
+                self._marcar_checkbox_por_texto(page, str(no), marcar=False)
+            except Exception:
+                pass
+
         grabar = self._sel("recepcion", "boton_grabar", default="^Grabar$")
-        btn = page.get_by_role("button", name=re.compile(str(grabar), re.I))
-        if btn.count():
-            btn.first.click()
-            page.wait_for_timeout(800)
-        else:
+        if not self._click_boton_en_scopes(page, str(grabar)):
             raise RuntimeError("No se encontró botón Grabar en Recepcionar Documentación")
+        log.info("Recepcionar: Grabar OK")
+        page.wait_for_timeout(1000)
 
     def _datos_generales(self, page: Page, doc: dict) -> None:
         dg = self.selectors.get("datos_generales") or {}
