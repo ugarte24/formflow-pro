@@ -2,7 +2,7 @@
   "_comentario": "Calibrado parcialmente — Riberalta Contribuyentes v6.44.123. Ver CALIBRACION.md",
   "contribuyente_natural": {
     "link_role": "link",
-    "link_name": "^Contribuyente Natural$"
+    "link_name": "Contribuyente\\s+Natural"
   },
   "registro_contribuyente_natural": {
     "link_role": "link",

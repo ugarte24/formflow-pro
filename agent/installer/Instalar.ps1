@@ -60,6 +60,7 @@ try {
       "BASE_URL=https://formflow-pro-sigma.vercel.app"
       "POLL_SECONDS=4"
       "FIREFOX_MODE=persistent"
+      "RUAT_START_URL=http://municipios.ruat.net/ContribuyentesWeb/Administracion/menuPrincipal/MenuPrincipalController.jpf"
     ) | Set-Content -Encoding ASCII $envDest
     Write-Host "Se creo .env automaticamente (solo BASE_URL)." -ForegroundColor Green
   }
