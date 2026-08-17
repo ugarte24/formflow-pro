@@ -370,8 +370,19 @@ function Verificar() {
             </div>
           </div>
         ) : fotoUrl ? (
-          <div className="px-4 py-3">
-            <img src={fotoUrl} alt="Fotografía del contribuyente" className="mx-auto max-h-48 object-contain" />
+          <div className="px-4 py-4">
+            <div className="mx-auto w-[min(100%,11rem)]">
+              <div className="overflow-hidden rounded-xl border border-border bg-muted shadow-sm ring-1 ring-black/5">
+                <div className="relative aspect-[3/4] w-full bg-muted">
+                  <img
+                    src={fotoUrl}
+                    alt="Fotografía del contribuyente"
+                    className="absolute inset-0 h-full w-full object-cover object-center"
+                  />
+                </div>
+              </div>
+              <p className="mt-2 text-center text-[11px] text-muted-foreground">Fotografía para RUAT</p>
+            </div>
             {!bloqueado ? (
               <button
                 type="button"
