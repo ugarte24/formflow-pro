@@ -89,6 +89,12 @@ try {
       "RUAT_START_URL=http://municipios.ruat.net/ContribuyentesWeb/Administracion/menuPrincipal/MenuPrincipalController.jpf"
     ) | Set-Content -Encoding ASCII $envDest
     Write-Host "Se creo .env automaticamente (solo BASE_URL)." -ForegroundColor Green
+  } else {
+    $envTxt = Get-Content -Raw $envDest
+    if ($envTxt -notmatch '(?m)^\s*RUAT_START_URL\s*=') {
+      Add-Content -Encoding ASCII $envDest "`r`nRUAT_START_URL=http://municipios.ruat.net/ContribuyentesWeb/Administracion/menuPrincipal/MenuPrincipalController.jpf"
+      Write-Host "Se agrego RUAT_START_URL (municipios.ruat.net) al .env." -ForegroundColor Green
+    }
   }
 
   Write-Host "Al iniciar el agente, use el mismo email y contrasena de la web." -ForegroundColor Cyan

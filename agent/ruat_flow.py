@@ -27,10 +27,11 @@ log = logging.getLogger("ruat")
 
 SELECTORS_PATH = Path(__file__).with_name("selectors.json")
 
-# Menú principal Riberalta (fallback si falta RUAT_START_URL en .env)
+# Entrada fija del agente (menú principal Contribuyentes — municipios.ruat.net)
 RUAT_MENU_DEFAULT = (
     "http://municipios.ruat.net/ContribuyentesWeb/Administracion/menuPrincipal/MenuPrincipalController.jpf"
 )
+RUAT_HOST_HINT = "municipios.ruat.net"
 
 
 class ContribuyenteYaRegistrado(Exception):
@@ -88,10 +89,57 @@ class RuatAutomator:
         if self._context is not None:
             self._context.on("page", lambda p: p.on("dialog", self._on_browser_dialog))
         self.page.on("dialog", self._on_browser_dialog)
-        if self.ruat_url and self.ruat_url not in (self.page.url or ""):
-            log.info("Navegando a RUAT_START_URL…")
-            self.page.goto(self.ruat_url, wait_until="domcontentloaded")
+        self._abrir_ruat_al_inicio()
         log.info("Firefox listo · mode=%s · url=%s", self.mode, self.page.url)
+
+    def _abrir_ruat_al_inicio(self) -> None:
+        """Siempre navega a municipios.ruat.net (menú) al abrir el navegador del agente."""
+        assert self.page is not None
+        url_dest = (self.ruat_url or RUAT_MENU_DEFAULT).strip() or RUAT_MENU_DEFAULT
+        if RUAT_HOST_HINT not in url_dest.lower():
+            log.warning(
+                "RUAT_START_URL no apunta a %s (%s) — uso menú por defecto",
+                RUAT_HOST_HINT,
+                url_dest,
+            )
+            url_dest = RUAT_MENU_DEFAULT
+            self.ruat_url = url_dest
+
+        actual = (self.page.url or "").strip()
+        log.info("Abriendo navegador del agente → %s (antes: %s)", url_dest, actual or "—")
+        try:
+            self.page.goto(url_dest, wait_until="domcontentloaded", timeout=60000)
+        except Exception as exc:
+            log.warning("goto municipios.ruat.net falló (%s) — reintento", exc)
+            try:
+                self.page.goto(url_dest, wait_until="commit", timeout=60000)
+            except Exception as exc2:
+                log.error("No se pudo abrir %s: %s", url_dest, exc2)
+                raise RuntimeError(
+                    f"No se pudo abrir {RUAT_HOST_HINT}. Verifique la red/VPN del municipio."
+                ) from exc2
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        # Cerrar pestañas about:blank sobrantes del perfil persistente
+        if self._context is not None:
+            try:
+                for p in list(self._context.pages):
+                    if p == self.page or p.is_closed():
+                        continue
+                    u = (p.url or "").lower()
+                    if u in ("", "about:blank", "about:newtab"):
+                        try:
+                            p.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        self.page = self._page_activa() if self._context else self.page
+        final = (self.page.url or "") if self.page else ""
+        if RUAT_HOST_HINT not in final.lower():
+            log.warning("Tras goto la URL no es municipios.ruat.net: %s", final)
 
     @staticmethod
     def _on_browser_dialog(dialog) -> None:
@@ -121,6 +169,10 @@ class RuatAutomator:
             headless=False,
             accept_downloads=True,
             viewport={"width": 1366, "height": 900},
+            firefox_user_prefs={
+                "browser.startup.homepage": RUAT_MENU_DEFAULT,
+                "browser.startup.page": 1,
+            },
         )
         self.page = self._pick_page(self._context)
         log.info(
