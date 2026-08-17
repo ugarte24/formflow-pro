@@ -311,16 +311,14 @@ class RuatAutomator:
         if not self.ruat_url:
             return page
         url = (page.url or "").lower()
-        texto = self._page_text(page)
-        if (
-            "menuprincipal" in url
-            or "armadosubmenu" in url
-            or "submenu" in url
-            or "registro contribuyente natural" in texto
-            or self._ya_en_buscar_contribuyente(page)
-            or self._page_score(page) >= 40
+        # Ya estamos en menú principal o más adelante en el flujo útil
+        if self._ya_en_buscar_contribuyente(page) or self._link_registro_visible(page):
+            return page
+        if "menuprincipalcontroller" in url or (
+            "menuprincipal" in url and "armadosubmenu" not in url and "submenu" not in url
         ):
             return page
+        # En otro submenú / pantalla: volver al menú para entrar a Contribuyente Natural
         log.info("Navegando al menú principal RUAT (misma ventana)…")
         try:
             page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
@@ -332,14 +330,48 @@ class RuatAutomator:
         page.wait_for_timeout(400)
         return self._page_activa()
 
-    def _ya_en_submenu_contribuyente_natural(self, page: Page) -> bool:
-        url = (page.url or "").lower()
-        if "armadosubmenu" in url or "submenu" in url:
-            return True
+    def _patrones_registro(self) -> list[str]:
+        patterns = self._sel("registro_contribuyente_natural", "link_names", default=None)
+        if isinstance(patterns, list) and patterns:
+            return [str(p) for p in patterns]
+        primary = self._sel(
+            "registro_contribuyente_natural",
+            "link_name",
+            default=r"^Registro\s+(de\s+)?Contribuyente\s+Natural$",
+        )
+        return [
+            str(primary),
+            r"^Registro\s+Contribuyente\s+Natural$",
+            r"^Registro\s+de\s+Contribuyente\s+Natural$",
+            r"Registro\s+Contribuyente\s+Natural",
+        ]
+
+    def _link_registro_visible(self, page: Page) -> bool:
+        """True solo si en el submenú aparece el enlace Registro (Contribuyente Natural)."""
+        for pat in self._patrones_registro():
+            rx = re.compile(str(pat), re.I)
+            for scope in self._scopes(page):
+                try:
+                    if scope.get_by_role("link", name=rx).count():
+                        return True
+                except Exception:
+                    pass
+                try:
+                    if scope.locator("a").filter(has_text=rx).count():
+                        return True
+                except Exception:
+                    pass
         texto = self._page_text(page)
         return "registro contribuyente natural" in texto and (
-            "baja de contribuyente" in texto or "modificación contribuyente" in texto or "modificacion contribuyente" in texto
+            "baja de contribuyente" in texto
+            or "modificación contribuyente" in texto
+            or "modificacion contribuyente" in texto
+            or "contribuyente natural" in texto
         )
+
+    def _ya_en_submenu_contribuyente_natural(self, page: Page) -> bool:
+        """Submenú CONTRIBUYENTE NATURAL (no cualquier armadoSubmenu)."""
+        return self._link_registro_visible(page)
 
     def _ya_en_buscar_contribuyente(self, page: Page) -> bool:
         """Formulario Buscar (layout tras clic en Registro…), no el link del submenú."""
@@ -434,49 +466,64 @@ class RuatAutomator:
         return self._page_activa()
 
     def _ir_contribuyente_natural(self, page: Page) -> Page:
+        """Paso 1: menú → Contribuyente Natural (esperar submenú con enlace Registro)."""
         page = self._page_activa()
-        if self._ya_en_submenu_contribuyente_natural(page) or self._ya_en_buscar_contribuyente(page):
-            log.info("Ya en submenú/Buscar — mismo layout, no reabro menú")
+        if self._ya_en_buscar_contribuyente(page):
+            log.info("Ya en Buscar Contribuyente — no reabro menú")
             return page
-        return self._click_menu(
-            r"^Contribuyente Natural$",
-            esperar=lambda p: self._ya_en_submenu_contribuyente_natural(p) or self._ya_en_buscar_contribuyente(p),
-            timeout_ms=12000,
+        if self._link_registro_visible(page):
+            log.info("Ya en submenú Contribuyente Natural (Registro visible)")
+            return page
+
+        nombre = self._sel("contribuyente_natural", "link_name", default=r"^Contribuyente Natural$")
+        log.info("Paso 1/2: abrir Contribuyente Natural…")
+        page = self._click_menu(
+            str(nombre),
+            esperar=lambda p: self._link_registro_visible(p) or self._ya_en_buscar_contribuyente(p),
+            timeout_ms=15000,
         )
+        if self._ya_en_buscar_contribuyente(page) or self._link_registro_visible(page):
+            return page
+
+        # Reintento desde menú principal
+        log.warning("Submenú no apareció — reintento desde menú principal")
+        page = self._ir_menu_principal()
+        page = self._click_menu(
+            str(nombre),
+            esperar=lambda p: self._link_registro_visible(p) or self._ya_en_buscar_contribuyente(p),
+            timeout_ms=15000,
+        )
+        if not (self._ya_en_buscar_contribuyente(page) or self._link_registro_visible(page)):
+            raise RuntimeError(
+                "No pude abrir el submenú «Contribuyente Natural». "
+                "Deje visible el menú principal RUAT y vuelva a enviar."
+            )
+        return page
 
     def _ir_registro_contribuyente_natural(self, page: Page) -> Page:
+        """Paso 2: submenú → Registro Contribuyente Natural → Buscar."""
         page = self._page_activa()
         if self._ya_en_buscar_contribuyente(page):
             log.info("Ya en Buscar Contribuyente — sigo con CI")
             return page
-        if not self._ya_en_submenu_contribuyente_natural(page):
-            page = self._ir_contribuyente_natural(page)
-            if self._ya_en_buscar_contribuyente(page):
-                return page
 
-        patterns = self._sel("registro_contribuyente_natural", "link_names", default=None)
-        if isinstance(patterns, list) and patterns:
-            candidatos = [str(p) for p in patterns]
-        else:
-            primary = self._sel(
-                "registro_contribuyente_natural",
-                "link_name",
-                default=r"^Registro\s+(de\s+)?Contribuyente\s+Natural$",
-            )
-            candidatos = [
-                str(primary),
-                r"^Registro\s+Contribuyente\s+Natural$",
-                r"^Registro\s+de\s+Contribuyente\s+Natural$",
-                r"Registro\s+Contribuyente\s+Natural",
-            ]
+        # Siempre asegurar paso 1 antes del Registro
+        page = self._ir_contribuyente_natural(page)
+        if self._ya_en_buscar_contribuyente(page):
+            return page
 
-        for pat in candidatos:
+        log.info("Paso 2/2: abrir Registro Contribuyente Natural…")
+        for pat in self._patrones_registro():
             page = self._page_activa()
             if self._ya_en_buscar_contribuyente(page):
                 return page
+            if not self._link_registro_visible(page):
+                page = self._ir_contribuyente_natural(page)
+                if self._ya_en_buscar_contribuyente(page):
+                    return page
             if not self._click_por_nombre(page, pat):
                 continue
-            log.info("Clic «%s» — espero formulario Buscar en la misma ventana", pat)
+            log.info("Clic «%s» — espero formulario Buscar", pat)
             page = self._esperar_ui(self._ya_en_buscar_contribuyente, timeout_ms=15000, desc="Buscar Contribuyente")
             if self._ya_en_buscar_contribuyente(page):
                 return page
@@ -485,8 +532,8 @@ class RuatAutomator:
         if self._ya_en_buscar_contribuyente(page):
             return page
         raise RuntimeError(
-            "No pude abrir «Registro Contribuyente Natural» en esta ventana. "
-            "Deje visible el submenú CONTRIBUYENTE NATURAL y vuelva a enviar."
+            "No pude abrir «Registro Contribuyente Natural». "
+            "Debe verse el submenú CONTRIBUYENTE NATURAL y luego el enlace Registro. Vuelva a enviar."
         )
 
     def procesar(self, doc: dict) -> None:
@@ -502,16 +549,12 @@ class RuatAutomator:
             )
             return
 
-        # Misma ventana: solo cambia el diseño (menú → submenú → Buscar → …)
+        # Orden fijo: 1) Contribuyente Natural → 2) Registro Contribuyente Natural → Buscar
         if self._ya_en_buscar_contribuyente(page):
             log.info("Buscar ya abierto — sigo con CI")
-        elif self._ya_en_submenu_contribuyente_natural(page):
-            log.info("Submenú ya abierto — abro Registro…")
-            page = self._ir_registro_contribuyente_natural(page)
         else:
             page = self._ir_menu_principal()
-            if not self._ya_en_buscar_contribuyente(page):
-                page = self._ir_contribuyente_natural(page)
+            page = self._ir_contribuyente_natural(page)
             if not self._ya_en_buscar_contribuyente(page):
                 page = self._ir_registro_contribuyente_natural(page)
 
