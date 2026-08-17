@@ -200,6 +200,36 @@ function Verificar() {
     }
   }
 
+  /** Si el agente se colgó tras tomar el trámite (enviado_pc), vuelve a ponerlo en cola. */
+  async function reencolar() {
+    if (!doc || !sesion) return;
+    setGuardando(true);
+    try {
+      const { error } = await supabase
+        .from("documents")
+        .update({
+          status: "confirmado",
+          sent_at: new Date().toISOString(),
+          error_message: null,
+          computer_id: null,
+        })
+        .eq("id", doc.id);
+      if (error) throw error;
+      await supabase.from("operation_logs").insert({
+        document_id: doc.id,
+        operator_id: sesion.userId,
+        evento: "Reencolado manual — esperando agente",
+      });
+      toast.success("Volvió a la cola. El agente debe estar abierto con la misma cuenta.");
+      await refetch();
+      void queryClient.invalidateQueries({ queryKey: ["documento", id] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "No se pudo reencolar");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   async function cancelar() {
     if (!doc || !sesion) return;
     detenerCamara();
@@ -252,17 +282,32 @@ function Verificar() {
               ? "Registrado en el sistema empresarial"
               : doc.status === "formulario_completado"
                 ? "Formulario completado — revise antes de guardar"
-                : "Datos enviados, esperando procesamiento…"}
+                : doc.status === "enviado_pc"
+                  ? "El agente lo recibió — procesando en Firefox…"
+                  : "En cola — esperando al agente…"}
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {doc.status === "formulario_completado"
               ? "Revise el Reporte de Control de Datos con el contribuyente y luego pulse Grabar en RUAT. El agente no guardó el trámite."
-              : "El agente de escritorio recibirá los datos y completará el formulario en Firefox."}
+              : doc.status === "enviado_pc"
+                ? "Si lleva más de un minuto sin avanzar, reinicie Digitalizador Agent (misma cuenta) o pulse Reintentar envío."
+                : "Abra Digitalizador Agent e inicie sesión con el mismo email que en la web. Debe verse «Esperando trámites…»."}
           </p>
           {doc.error_message ? (
             <p className="mt-3 flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {doc.error_message}
             </p>
+          ) : null}
+          {doc.status === "confirmado" || doc.status === "enviado_pc" ? (
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={() => void reencolar()}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-60"
+            >
+              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Reintentar envío
+            </button>
           ) : null}
         </div>
       ) : revisar.length > 0 ? (

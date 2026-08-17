@@ -39,7 +39,8 @@ export const Route = createFileRoute("/api/public/agente/pendientes")({
           .select(
             "id, numero_documento, nombres, apellidos, genero, estado_civil, fecha_nacimiento, barrio, avenida, numero_puerta, image_path, foto_path, sent_at, operator_id",
           )
-          .eq("status", "confirmado")
+          // confirmado = nuevo; enviado_pc = reclamable si el agente se colgó sin reportar resultado
+          .in("status", ["confirmado", "enviado_pc"])
           .not("foto_path", "is", null)
           .order("sent_at", { ascending: true })
           .limit(10);
