@@ -201,6 +201,156 @@ class RuatAutomator:
         except Exception:
             return -1
 
+    def identificar_pantalla(self, page: Page | None = None) -> str:
+        """
+        Identifica el layout actual en la misma ventana RUAT.
+        Orden: de lo más específico a lo más general.
+        """
+        page = page or self._page_activa()
+        url = (page.url or "").lower()
+        texto = self._page_text(page)
+
+        def tiene(*frags: str) -> bool:
+            return all(f.lower() in texto for f in frags)
+
+        def tiene_alguno(*frags: str) -> bool:
+            return any(f.lower() in texto for f in frags)
+
+        # --- Alta / tramitación (más adelante en el flujo) ---
+        if tiene_alguno("imprimir reporte", "reporte de control") and tiene_alguno("grabar", "salir"):
+            return "confirmar"
+        if tiene_alguno("editar fotografía", "editar fotografia") or (
+            tiene("procesar") and tiene("finalizar") and ("fotografía" in texto or "fotografia" in texto)
+        ):
+            return "editar_foto"
+        if tiene_alguno("registrar imágenes", "registrar imagenes") or (
+            "fotografía" in texto and "anverso" in texto
+        ):
+            return "imagenes"
+        if tiene_alguno("información adicional", "informacion adicional") and "celular" in texto:
+            return "info_adicional"
+        if "apoderado" in texto and tiene_alguno("desea registrar", "¿desea"):
+            return "apoderado"
+        if tiene_alguno("domicilio legal", "búsqueda avanzada de domicilio", "busqueda avanzada de domicilio"):
+            return "domicilio"
+        if tiene_alguno("datos generales", "estado civil") and tiene_alguno("fecha de nacimiento", "género", "genero"):
+            return "datos_generales"
+        if tiene_alguno("recepcionar documentación", "recepcionar documentacion", "documento de identidad"):
+            if "grabar" in texto or "documentación" in texto or "documentacion" in texto:
+                return "recepcionar"
+
+        # --- Buscar / resultados ---
+        if self._ya_en_buscar_contribuyente(page):
+            if tiene("resultados") and (
+                self._hay_coincidencia(page)
+                or tiene_alguno("gobierno municipal", "nuevo contribuyente", "pmc")
+            ):
+                return "resultados_busqueda"
+            return "buscar"
+
+        # --- Menú / submenú ---
+        if self._link_registro_visible(page):
+            return "submenu_contribuyente_natural"
+
+        # Menú principal: link Contribuyente Natural (sin el submenú Registro aún)
+        nombre_cn = str(self._sel("contribuyente_natural", "link_name", default=r"^Contribuyente Natural$"))
+        if self._hay_control_nombre(page, nombre_cn) and not self._link_registro_visible(page):
+            if tiene_alguno("registro contribuyentes", "menu principal", "menú principal") or "menuprincipal" in url:
+                return "menu_principal"
+            # Aun sin el título, si el link está y no hay Registro → menú
+            return "menu_principal"
+
+        if "menuprincipalcontroller" in url or (
+            "menuprincipal" in url and "armadosubmenu" not in url and "submenu" not in url
+        ):
+            return "menu_principal"
+
+        if "armadosubmenu" in url or "submenu" in url:
+            # Otro submenú (no el de Contribuyente Natural)
+            return "submenu_otro"
+
+        if "ruat" in url or "municipios" in url or "contribuyentes" in url:
+            return "ruat_otra"
+
+        return "desconocida"
+
+    def _hay_control_nombre(self, page: Page, name_pattern: str) -> bool:
+        pat = re.compile(str(name_pattern), re.I)
+        for scope in self._scopes(page):
+            for role in ("link", "button", "menuitem"):
+                try:
+                    if scope.get_by_role(role, name=pat).count():
+                        return True
+                except Exception:
+                    continue
+            try:
+                if scope.locator("a").filter(has_text=pat).count():
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _asegurar_pantalla_buscar(self, page: Page) -> Page:
+        """
+        Desde cualquier pantalla conocida, llega a Buscar Contribuyente:
+        menú → Contribuyente Natural → Registro Contribuyente Natural → Buscar.
+        """
+        for intento in range(6):
+            page = self._page_activa()
+            pantalla = self.identificar_pantalla(page)
+            log.info("Pantalla detectada: %s (intento %s) · %s", pantalla, intento + 1, (page.url or "")[:90])
+
+            if pantalla in ("buscar", "resultados_busqueda"):
+                return page
+
+            if pantalla == "submenu_contribuyente_natural":
+                page = self._ir_registro_contribuyente_natural(page)
+                continue
+
+            if pantalla == "menu_principal":
+                page = self._ir_contribuyente_natural(page)
+                continue
+
+            # Mitad de un trámite anterior u otro submenú → volver al menú y reiniciar
+            if pantalla in (
+                "submenu_otro",
+                "recepcionar",
+                "datos_generales",
+                "domicilio",
+                "apoderado",
+                "info_adicional",
+                "imagenes",
+                "editar_foto",
+                "confirmar",
+                "ruat_otra",
+                "desconocida",
+            ):
+                log.info("Reinicio de flujo desde menú (estaba en %s)", pantalla)
+                page = self._ir_menu_principal()
+                # Forzar goto si seguimos fuera del menú
+                if self.identificar_pantalla(page) not in ("menu_principal", "buscar", "submenu_contribuyente_natural"):
+                    if self.ruat_url:
+                        try:
+                            page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
+                            page.wait_for_timeout(500)
+                        except Exception as exc:
+                            log.warning("goto menú: %s", exc)
+                continue
+
+            # Fallback
+            page = self._ir_menu_principal()
+            page = self._ir_contribuyente_natural(page)
+            if not self._ya_en_buscar_contribuyente(page):
+                page = self._ir_registro_contribuyente_natural(page)
+
+        page = self._page_activa()
+        if self._ya_en_buscar_contribuyente(page):
+            return page
+        raise RuntimeError(
+            f"No llegué a Buscar Contribuyente (pantalla={self.identificar_pantalla(page)}). "
+            "Deje el menú principal RUAT visible y vuelva a enviar."
+        )
+
     def _pick_page(self, context: BrowserContext) -> Page:
         """Elige la pestaña RUAT del contexto (normalmente hay una sola)."""
         pages = [p for p in context.pages if not p.is_closed()]
@@ -549,14 +699,9 @@ class RuatAutomator:
             )
             return
 
-        # Orden fijo: 1) Contribuyente Natural → 2) Registro Contribuyente Natural → Buscar
-        if self._ya_en_buscar_contribuyente(page):
-            log.info("Buscar ya abierto — sigo con CI")
-        else:
-            page = self._ir_menu_principal()
-            page = self._ir_contribuyente_natural(page)
-            if not self._ya_en_buscar_contribuyente(page):
-                page = self._ir_registro_contribuyente_natural(page)
+        # Identificar ventana y seguir el flujo hasta Buscar
+        page = self._asegurar_pantalla_buscar(page)
+        log.info("Listo en pantalla: %s", self.identificar_pantalla(page))
 
         self._buscar_contribuyente(page, doc)
 

@@ -29,7 +29,18 @@ Municipio: **Gobierno Municipal de Riberalta** · App: Contribuyentes · Ver. **
 
 ## Detalle por captura
 
-### 1. Inicio — Menú principal
+## Detección de pantalla (agente)
+
+El agente identifica el layout actual antes de cada trámite:
+
+| Código | Pantalla |
+|---|---|
+| `menu_principal` | Menú → clic Contribuyente Natural |
+| `submenu_contribuyente_natural` | Submenú → clic Registro Contribuyente Natural |
+| `buscar` / `resultados_busqueda` | Formulario Buscar / resultados |
+| `recepcionar` … `confirmar` | Pasos del alta (si quedó a medias, vuelve al menú) |
+
+Flujo de entrada siempre: **menú → Contribuyente Natural → Registro → Buscar**.
 
 - **URL:** `http://municipios.ruat.net/ContribuyentesWeb/Administracion/menuPrincipal/MenuPrincipalController.jpf`
 - **Columna:** REGISTRO CONTRIBUYENTES
