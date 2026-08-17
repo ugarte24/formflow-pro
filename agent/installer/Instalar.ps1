@@ -24,6 +24,21 @@ try {
     throw "No se encuentra DigitalizadorAgent.exe. Extraiga el ZIP completo antes de instalar."
   }
 
+  Write-Host "Cerrando Digitalizador Agent si esta abierto..." -ForegroundColor Yellow
+  Get-Process -Name "DigitalizadorAgent" -ErrorAction SilentlyContinue | ForEach-Object {
+    try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch {}
+  }
+  # Firefox del agente (Playwright) tambien puede bloquear DLLs
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -match 'firefox|Digitalizador' -and
+      ($_.CommandLine -match 'DigitalizadorAgent|ms-playwright|playwright' -or $_.ExecutablePath -match 'Digitalizador|ms-playwright')
+    } |
+    ForEach-Object {
+      try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {}
+    }
+  Start-Sleep -Seconds 2
+
   New-Item -ItemType Directory -Force -Path $Destino | Out-Null
 
   # Conservar .env existente
@@ -36,17 +51,28 @@ try {
   }
 
   Write-Host "Copiando archivos..."
-  Get-ChildItem $Origen -Force | Where-Object {
-    $_.Name -notin @("Instalar.bat", "Instalar.ps1", "Desinstalar.bat", "Desinstalar.ps1")
-  } | ForEach-Object {
-    $target = Join-Path $Destino $_.Name
-    if ($_.PSIsContainer) {
-      if (Test-Path $target) {
-        Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+  $maxTries = 5
+  for ($try = 1; $try -le $maxTries; $try++) {
+    try {
+      Get-ChildItem $Origen -Force | Where-Object {
+        $_.Name -notin @("Instalar.bat", "Instalar.ps1", "Desinstalar.bat", "Desinstalar.ps1")
+      } | ForEach-Object {
+        $target = Join-Path $Destino $_.Name
+        if ($_.PSIsContainer) {
+          if (Test-Path $target) {
+            Remove-Item -Recurse -Force $target -ErrorAction Stop
+          }
+          Copy-Item -Recurse -Force $_.FullName -Destination $Destino -ErrorAction Stop
+        } else {
+          Copy-Item -Force $_.FullName -Destination $Destino -ErrorAction Stop
+        }
       }
-      Copy-Item -Recurse -Force $_.FullName -Destination $Destino
-    } else {
-      Copy-Item -Force $_.FullName -Destination $Destino
+      break
+    } catch {
+      if ($try -eq $maxTries) { throw }
+      Write-Host "Archivo en uso (intento $try/$maxTries). Cerrando procesos y reintentando..." -ForegroundColor Yellow
+      Get-Process -Name "DigitalizadorAgent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+      Start-Sleep -Seconds 2
     }
   }
 
@@ -120,9 +146,10 @@ catch {
   Write-Host $_.Exception.Message -ForegroundColor Red
   Write-Host ""
   Write-Host "Consejos:"
-  Write-Host "1) Extraiga el ZIP a una carpeta (Escritorio) y ejecute Instalar.bat desde ahi."
-  Write-Host "2) Cierre Digitalizador Agent si estaba abierto."
-  Write-Host "3) Pruebe clic derecho -> Ejecutar como administrador."
+  Write-Host "1) Cierre Digitalizador Agent (clic derecho icono bandeja -> Salir)."
+  Write-Host "2) Si sigue el error: Ctrl+Shift+Esc -> finalizar DigitalizadorAgent.exe"
+  Write-Host "3) Extraiga el ZIP a una carpeta y ejecute Instalar.bat de nuevo."
+  Write-Host "4) Pruebe clic derecho -> Ejecutar como administrador."
   Write-Host ""
   exit 1
 }

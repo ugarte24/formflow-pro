@@ -163,7 +163,8 @@ def apply_update_and_restart(
         "  timeout /t 1 /nobreak >NUL",
         "  goto wait",
         ")",
-        "timeout /t 1 /nobreak >NUL",
+        "taskkill /F /IM DigitalizadorAgent.exe >NUL 2>&1",
+        "timeout /t 2 /nobreak >NUL",
         "echo Copiando archivos nuevos...",
     ]
     for name in preserve:
