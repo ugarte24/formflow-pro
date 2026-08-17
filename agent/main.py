@@ -93,6 +93,7 @@ def main() -> int:
     automator = RuatAutomator(download_dir=download)
     status = {"text": "Iniciando…"}
     stop = threading.Event()
+    fatal = {"msg": None}
 
     log.info(
         "Agente iniciado · v%s · %s · usuario=%s · poll=%ss · mode=%s",
@@ -105,28 +106,33 @@ def main() -> int:
     if automator.dry_run:
         log.warning("DRY_RUN activo: no interactúa con Firefox, solo reporta pendientes")
 
-    try:
-        if not automator.dry_run:
-            status["text"] = "Conectando Firefox…"
-            automator.connect()
-    except Exception as exc:
-        log.error("No se pudo conectar a Firefox/Playwright: %s", exc)
-        show_error(
-            "Digitalizador Agent",
-            "No se pudo conectar a Firefox/Playwright.\n"
-            "Verifique la instalación o FIREFOX_MODE.\n\n"
-            f"{exc}",
-        )
-        return 1
-
     def worker() -> None:
-        status["text"] = "Esperando trámites…"
+        # Playwright sync DEBE vivir solo en este hilo (evita greenlet "Cannot switch thread")
+        try:
+            if not automator.dry_run:
+                status["text"] = "Abriendo Firefox / menú RUAT…"
+                automator.connect()
+                status["text"] = (
+                    "Esperando trámites… Deje visible el menú principal RUAT "
+                    "(Contribuyente Natural) en la ventana del agente."
+                )
+            else:
+                status["text"] = "Esperando trámites… (DRY_RUN)"
+        except Exception as exc:
+            log.error("No se pudo conectar a Firefox/Playwright: %s", exc)
+            fatal["msg"] = str(exc)
+            status["text"] = "Error al abrir Firefox"
+            stop.set()
+            return
+
         while not stop.is_set():
             try:
                 payload = api.pendientes()
                 docs = payload.get("documentos") or []
                 if not docs:
-                    status["text"] = "Esperando trámites…"
+                    status["text"] = (
+                        "Esperando trámites… Menú RUAT: Contribuyente Natural → Registro"
+                    )
                     stop.wait(poll)
                     continue
 
@@ -159,11 +165,15 @@ def main() -> int:
                     except Exception as exc:
                         log.exception("Error automatizando %s", doc_id)
                         msg = str(exc)
-                        if "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
+                        if "greenlet" in msg.lower() or "Cannot switch" in msg:
                             msg = (
-                                "Se perdio el control de Nightly. Cierre TODAS las ventanas Nightly, "
-                                "inicie solo Digitalizador Agent, espere la Nightly que abre el agente, "
-                                "inicie sesion RUAT ahi (no abra otra Nightly a mano) y vuelva a enviar."
+                                "Error interno de hilos del agente. Actualice a la última versión "
+                                "y reinicie Digitalizador Agent."
+                            )
+                        elif "has been closed" in msg or "Target page" in msg or "browser has been closed" in msg:
+                            msg = (
+                                "Se perdio el control de Firefox. Cierre ventanas extras, "
+                                "deje solo la del agente con el menú RUAT e inicie sesión ahí."
                             )
                             try:
                                 automator.ensure_connected()
@@ -191,6 +201,16 @@ def main() -> int:
     t = threading.Thread(target=worker, name="agent-worker", daemon=True)
     t.start()
 
+    # Si Firefox falló al arrancar, avisar en el hilo de UI
+    def _check_fatal() -> None:
+        if fatal["msg"]:
+            show_error(
+                "Digitalizador Agent",
+                "No se pudo conectar a Firefox/Playwright.\n"
+                "Verifique la instalación o FIREFOX_MODE.\n\n"
+                f"{fatal['msg']}",
+            )
+
     ico = resolve_data_file("DigitalizadorAgent.ico")
     user_label = session.email or session.nombre or session.user_id or "—"
 
@@ -212,6 +232,8 @@ def main() -> int:
         on_quit=on_quit,
         on_logout=on_logout,
     )
+    # Dar un momento al worker para conectar / fallar
+    threading.Timer(2.5, _check_fatal).start()
     try:
         win.run()
     finally:
