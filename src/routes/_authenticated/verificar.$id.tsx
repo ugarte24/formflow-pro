@@ -151,6 +151,7 @@ function Verificar() {
   const revisar = CAMPOS.filter((c) => (confianza[c.key] ?? 0) < 0.85 || !valores[c.key]);
   const meta = doc ? STATUS_META[doc.status as DocStatus] : null;
   const bloqueado = !!doc && ["confirmado", "enviado_pc", "formulario_completado", "registrado"].includes(doc.status);
+  const puedeReintentar = !!doc && (doc.status === "confirmado" || doc.status === "enviado_pc");
 
   const { data: fotoUrl } = useQuery({
     queryKey: ["foto-url", doc?.foto_path],
@@ -277,7 +278,7 @@ function Verificar() {
       ) : null}
 
       {bloqueado ? (
-        <div className="panel sticky top-[4.5rem] z-10 mb-4 border-primary/25 p-4 shadow-sm sm:static sm:top-auto sm:p-5 sm:shadow-none">
+        <div className="panel mb-4 border-primary/25 p-4 sm:p-5">
           <p className="label-caps">Estado del envío</p>
           <h2 className="mt-1 text-base font-semibold sm:text-lg">
             {doc.status === "registrado"
@@ -300,12 +301,12 @@ function Verificar() {
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {doc.error_message}
             </p>
           ) : null}
-          {doc.status === "confirmado" || doc.status === "enviado_pc" ? (
+          {puedeReintentar ? (
             <button
               type="button"
               disabled={guardando}
               onClick={() => void reencolar()}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold hover:bg-muted disabled:opacity-60 sm:inline-flex sm:w-auto sm:py-2.5 sm:font-medium"
+              className="mt-4 hidden items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-60 sm:inline-flex"
             >
               {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
               Reintentar envío
@@ -481,18 +482,7 @@ function Verificar() {
           </div>
         </>
       ) : (
-        <div className="mt-4 space-y-2.5 pb-2">
-          {doc.status === "confirmado" || doc.status === "enviado_pc" ? (
-            <button
-              type="button"
-              disabled={guardando}
-              onClick={() => void reencolar()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-60 sm:hidden"
-            >
-              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-              Reintentar envío
-            </button>
-          ) : null}
+        <div className="mt-4 space-y-2.5 pb-20 sm:pb-2">
           <button
             type="button"
             onClick={() => router.navigate({ to: "/inicio" })}
@@ -502,6 +492,23 @@ function Verificar() {
           </button>
         </div>
       )}
+
+      {/* Móvil: botón siempre visible encima de la barra de navegación */}
+      {puedeReintentar ? (
+        <div className="fixed inset-x-0 bottom-16 z-30 border-t border-border bg-surface/95 p-3 backdrop-blur sm:hidden">
+          <div className="mx-auto max-w-3xl">
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={() => void reencolar()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Reintentar envío
+            </button>
+          </div>
+        </div>
+      ) : null}
     </AppShell>
   );
 }
