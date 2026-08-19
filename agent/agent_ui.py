@@ -27,6 +27,8 @@ class AgentWindow:
         ico_path,
         on_quit: Callable[[], None],
         on_logout: Callable[[], None] | None = None,
+        on_iniciar: Callable[[], None] | None = None,
+        on_pausar: Callable[[], None] | None = None,
     ) -> None:
         self.base_url = base_url
         self.user_label = user_label
@@ -36,6 +38,8 @@ class AgentWindow:
         self.ico_path = ico_path
         self.on_quit = on_quit
         self.on_logout = on_logout
+        self.on_iniciar = on_iniciar
+        self.on_pausar = on_pausar
         self.version = local_version()
         self._updating = False
         self._closed = False
@@ -57,9 +61,11 @@ class AgentWindow:
         ttk.Label(pad, text="Digitalizador Agent", font=("Segoe UI", 14, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
-        ttk.Label(pad, text="Automatización RUAT en este PC", foreground="#666").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(0, 12)
-        )
+        ttk.Label(
+            pad,
+            text="Usted abre RUAT e inicia sesión; luego pulse Iniciar",
+            foreground="#666",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 12))
 
         self.lbl_user = ttk.Label(pad, text=f"Usuario: {user_label}")
         self.lbl_user.grid(row=2, column=0, columnspan=2, sticky="w")
@@ -76,8 +82,14 @@ class AgentWindow:
         btns = ttk.Frame(pad)
         btns.grid(row=6, column=0, columnspan=2, sticky="ew")
 
+        if on_iniciar:
+            self.btn_iniciar = ttk.Button(btns, text="Iniciar", command=self._click_iniciar)
+            self.btn_iniciar.pack(side="left")
+        if on_pausar:
+            ttk.Button(btns, text="Pausar", command=self._click_pausar).pack(side="left", padx=(8, 0))
+
         self.btn_update = ttk.Button(btns, text="Actualizar", command=self._click_update)
-        self.btn_update.pack(side="left")
+        self.btn_update.pack(side="left", padx=(8, 0))
 
         ttk.Button(btns, text="Ver log", command=self._open_log).pack(side="left", padx=(8, 0))
         ttk.Button(btns, text="Minimizar", command=self._minimize_to_tray).pack(side="left", padx=(8, 0))
@@ -105,12 +117,22 @@ class AgentWindow:
             on_logout=self._logout_from_tray if on_logout else None,
             on_show=self._show_from_tray,
             on_update=self._click_update,
+            on_iniciar=self._click_iniciar if on_iniciar else None,
+            on_pausar=self._click_pausar if on_pausar else None,
         )
         self._tray_thread = threading.Thread(target=self.tray.run, name="tray", daemon=True)
         self._tray_thread.start()
 
         self.root.after(400, self._tick)
         self.root.after(800, self._silent_check_update_label)
+
+    def _click_iniciar(self, _icon=None, _item=None) -> None:
+        if self.on_iniciar:
+            self.on_iniciar()
+
+    def _click_pausar(self, _icon=None, _item=None) -> None:
+        if self.on_pausar:
+            self.on_pausar()
 
     def run(self) -> None:
         self.root.mainloop()

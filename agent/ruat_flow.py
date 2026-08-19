@@ -91,44 +91,29 @@ class RuatAutomator:
         if self._context is not None:
             self._context.on("page", lambda p: p.on("dialog", self._on_browser_dialog))
         self.page.on("dialog", self._on_browser_dialog)
-        self._abrir_ruat_al_inicio()
-        log.info("Firefox listo · mode=%s · url=%s", self.mode, self.page.url)
+        # NO navegar a RUAT: el operador abre municipios.ruat.net e inicia sesión.
+        self._seleccionar_pestana_existente()
+        log.info(
+            "Firefox listo (sin forzar URL) · mode=%s · url=%s",
+            self.mode,
+            (self.page.url if self.page else "") or "—",
+        )
 
-    def _abrir_ruat_al_inicio(self) -> None:
-        """Siempre navega a municipios.ruat.net (menú) al abrir el navegador del agente."""
-        assert self.page is not None
-        url_dest = (self.ruat_url or RUAT_MENU_DEFAULT).strip() or RUAT_MENU_DEFAULT
-        if RUAT_HOST_HINT not in url_dest.lower():
-            log.warning(
-                "RUAT_START_URL no apunta a %s (%s) — uso menú por defecto",
-                RUAT_HOST_HINT,
-                url_dest,
-            )
-            url_dest = RUAT_MENU_DEFAULT
-            self.ruat_url = url_dest
-
-        actual = (self.page.url or "").strip()
-        log.info("Abriendo navegador del agente → %s (antes: %s)", url_dest, actual or "—")
+    def _seleccionar_pestana_existente(self) -> None:
+        """Elige la mejor pestaña abierta; no hace goto a municipios.ruat.net."""
+        if self._context is None:
+            return
         try:
-            self.page.goto(url_dest, wait_until="domcontentloaded", timeout=60000)
-        except Exception as exc:
-            log.warning("goto municipios.ruat.net falló (%s) — reintento", exc)
-            try:
-                self.page.goto(url_dest, wait_until="commit", timeout=60000)
-            except Exception as exc2:
-                log.error("No se pudo abrir %s: %s", url_dest, exc2)
-                raise RuntimeError(
-                    f"No se pudo abrir {RUAT_HOST_HINT}. Verifique la red/VPN del municipio."
-                ) from exc2
-        try:
-            self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+            self.page = self._pick_page(self._context)
         except Exception:
             pass
-        # Cerrar pestañas about:blank sobrantes del perfil persistente
-        if self._context is not None:
-            try:
-                for p in list(self._context.pages):
-                    if p == self.page or p.is_closed():
+        # Cerrar about:blank extras si ya hay una pestaña RUAT
+        try:
+            pages = [p for p in self._context.pages if not p.is_closed()]
+            has_ruat = any(RUAT_HOST_HINT in ((p.url or "").lower()) for p in pages)
+            if has_ruat:
+                for p in pages:
+                    if p == self.page:
                         continue
                     u = (p.url or "").lower()
                     if u in ("", "about:blank", "about:newtab"):
@@ -136,12 +121,60 @@ class RuatAutomator:
                             p.close()
                         except Exception:
                             pass
-            except Exception:
-                pass
-        self.page = self._page_activa() if self._context else self.page
-        final = (self.page.url or "") if self.page else ""
-        if RUAT_HOST_HINT not in final.lower():
-            log.warning("Tras goto la URL no es municipios.ruat.net: %s", final)
+                self.page = self._pick_page(self._context)
+        except Exception:
+            pass
+
+    def menu_principal_listo(self) -> bool:
+        """True si la ventana muestra el menú principal RUAT (sesión ya iniciada)."""
+        try:
+            page = self._page_activa()
+            pant = self.identificar_pantalla(page)
+            if pant == "menu_principal":
+                return True
+            if pant == "login_ruat":
+                return False
+            # Menú con columna REGISTRO CONTRIBUYENTES
+            if self._hay_contribuyente_natural_menu(page):
+                return True
+            url = (page.url or "").lower()
+            texto = self._page_text(page)
+            if RUAT_HOST_HINT in url and "contribuyente natural" in texto and "cerrar sesión" in texto:
+                return True
+            if RUAT_HOST_HINT in url and "registro contribuyentes" in texto:
+                return True
+            return False
+        except Exception:
+            return False
+
+    def motivo_menu_no_listo(self) -> str:
+        """Mensaje corto si aún no se puede iniciar el flujo."""
+        try:
+            page = self._page_activa()
+            pant = self.identificar_pantalla(page)
+            url = (page.url or "").strip()
+            if pant == "login_ruat":
+                return "RUAT pide inicio de sesión. Inicie sesión y deje el menú principal visible."
+            if not url or url.startswith("about:"):
+                return (
+                    "No hay página RUAT abierta. En la ventana del agente abra "
+                    "municipios.ruat.net, inicie sesión y deje el menú principal."
+                )
+            if RUAT_HOST_HINT not in url.lower():
+                return (
+                    f"La pestaña no es RUAT ({url[:60]}). Abra el menú principal "
+                    "de Contribuyentes e inicie sesión."
+                )
+            return (
+                f"Veo RUAT pero no el menú principal (pantalla={pant}). "
+                "Pulse «Menú Principal» en RUAT y luego Iniciar."
+            )
+        except Exception as exc:
+            return f"No se pudo leer el navegador: {exc}"
+
+    def _abrir_ruat_al_inicio(self) -> None:
+        """Obsoleto: ya no se navega automáticamente. Conservado por compatibilidad."""
+        self._seleccionar_pestana_existente()
 
     @staticmethod
     def _on_browser_dialog(dialog) -> None:
@@ -171,10 +204,7 @@ class RuatAutomator:
             headless=False,
             accept_downloads=True,
             viewport={"width": 1366, "height": 900},
-            firefox_user_prefs={
-                "browser.startup.homepage": RUAT_MENU_DEFAULT,
-                "browser.startup.page": 1,
-            },
+            # Sin homepage forzada: el operador abre RUAT e inicia sesión.
         )
         self.page = self._pick_page(self._context)
         log.info(
@@ -385,23 +415,35 @@ class RuatAutomator:
         return False
 
     def _forzar_menu_principal(self) -> Page:
-        """Siempre navega al menú RUAT (con URL por defecto si hace falta)."""
+        """
+        Vuelve al menú principal SIN abrir URL.
+        Intenta clic en «Menú Principal»; si ya está el menú, no hace nada.
+        Si no puede, pide al operador que deje el menú visible.
+        """
         page = self._page_activa()
-        url_dest = self.ruat_url or RUAT_MENU_DEFAULT
-        log.info("Forzando menú principal → %s", url_dest)
-        try:
-            page.goto(url_dest, wait_until="domcontentloaded", timeout=45000)
-        except Exception as exc:
-            log.warning("goto menú falló (%s) — reconecto", exc)
-            self.ensure_connected()
+        if self.menu_principal_listo():
+            log.info("Ya en menú principal — no navego")
+            return page
+
+        log.info("Intentando clic «Menú Principal» (sin goto URL)…")
+        if self._click_por_nombre(page, r"Men[uú]\s+Principal"):
+            page.wait_for_timeout(800)
             page = self._page_activa()
-            page.goto(url_dest, wait_until="domcontentloaded", timeout=45000)
-        try:
-            page.wait_for_load_state("domcontentloaded", timeout=15000)
-        except Exception:
-            pass
-        page.wait_for_timeout(800)
-        return self._page_activa()
+            if self.menu_principal_listo() or self._hay_contribuyente_natural_menu(page):
+                return page
+
+        # A veces el link está solo en sidebar del submenú
+        if self._click_por_nombre(page, r"^Men[uú]\s+Principal$"):
+            page.wait_for_timeout(800)
+            page = self._page_activa()
+            if self.menu_principal_listo() or self._hay_contribuyente_natural_menu(page):
+                return page
+
+        raise RuntimeError(
+            "No pude volver al menú principal sin abrir URL. "
+            "En Firefox del agente: pulse «Menú Principal», deje visible Contribuyente Natural "
+            "y use Reintentar envío / Iniciar."
+        )
 
     def _asegurar_pantalla_buscar(self, page: Page) -> Page:
         """
@@ -553,8 +595,7 @@ class RuatAutomator:
                 if self.page and not self.page.is_closed():
                     log.info("Recuperé la pestaña Nightly · url=%s", self.page.url)
                     self.page.on("dialog", self._on_browser_dialog)
-                    if self.ruat_url and self._page_score(self.page) < 15:
-                        self.page.goto(self.ruat_url, wait_until="domcontentloaded", timeout=45000)
+                    # No goto automático: el operador mantiene la sesión RUAT
                     return
             except Exception as exc:
                 log.warning("No pude recuperar pestaña (%s) — reinicio Nightly", exc)
@@ -827,6 +868,20 @@ class RuatAutomator:
                 bool(doc.get("foto_url")),
             )
             return
+
+        # Identificar ventana y seguir el flujo hasta Buscar (sin abrir URL)
+        if not self.menu_principal_listo() and self.identificar_pantalla(page) not in (
+            "submenu_contribuyente_natural",
+            "buscar",
+            "resultados_busqueda",
+            "recepcionar",
+            "datos_generales",
+            "domicilio",
+        ):
+            # Permitir continuar si ya está a mitad de un flujo útil; si no, exigir menú
+            pant0 = self.identificar_pantalla(page)
+            if pant0 in ("desconocida", "login_ruat", "ruat_otra", "submenu_otro"):
+                raise RuntimeError(self.motivo_menu_no_listo())
 
         def fase_llegar_y_buscar() -> None:
             p = self._asegurar_pantalla_buscar(self._page_activa())

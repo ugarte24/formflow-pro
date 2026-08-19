@@ -143,6 +143,8 @@ class TrayApp:
         on_logout: Callable[[], None] | None = None,
         on_show: Callable | None = None,
         on_update: Callable | None = None,
+        on_iniciar: Callable | None = None,
+        on_pausar: Callable | None = None,
     ) -> None:
         self.title = title
         self.status_fn = status_fn
@@ -154,6 +156,8 @@ class TrayApp:
         self.on_logout = on_logout
         self.on_show = on_show
         self.on_update = on_update
+        self.on_iniciar = on_iniciar
+        self.on_pausar = on_pausar
         self._icon = None
         self._stop = threading.Event()
 
@@ -214,6 +218,10 @@ class TrayApp:
             items.append(Item("Mostrar ventana", self.on_show))
         items.append(Item(lambda item: status_text(item), None, enabled=False))
         items.append(Item(f"Usuario: {self.user_label}", None, enabled=False))
+        if self.on_iniciar:
+            items.append(Item("Iniciar (menú RUAT listo)", self.on_iniciar))
+        if self.on_pausar:
+            items.append(Item("Pausar", self.on_pausar))
         if self.on_update:
             items.append(Item("Actualizar", self.on_update))
         items.append(Item("Ver log", self._open_log))

@@ -95,6 +95,9 @@ def main() -> int:
     status = {"text": "Iniciando…"}
     stop = threading.Event()
     fatal = {"msg": None}
+    # El operador abre RUAT, inicia sesión y pulsa «Iniciar» en el agente
+    start_requested = threading.Event()
+    flow_ready = threading.Event()
 
     log.info(
         "Agente iniciado · v%s · %s · usuario=%s · poll=%ss · mode=%s",
@@ -111,13 +114,14 @@ def main() -> int:
         # Playwright sync DEBE vivir solo en este hilo (evita greenlet "Cannot switch thread")
         try:
             if not automator.dry_run:
-                status["text"] = "Abriendo Firefox / menú RUAT…"
+                status["text"] = "Abriendo Firefox del agente…"
                 automator.connect()
                 status["text"] = (
-                    "Esperando trámites… Deje visible el menú principal RUAT "
-                    "(Contribuyente Natural) en la ventana del agente."
+                    "Abra municipios.ruat.net, inicie sesión, deje el MENÚ PRINCIPAL "
+                    "visible y pulse «Iniciar»."
                 )
             else:
+                flow_ready.set()
                 status["text"] = "Esperando trámites… (DRY_RUN)"
         except Exception as exc:
             log.error("No se pudo conectar a Firefox/Playwright: %s", exc)
@@ -128,17 +132,46 @@ def main() -> int:
 
         while not stop.is_set():
             try:
+                # Esperar confirmación del operador (menú RUAT listo)
+                if not automator.dry_run and not flow_ready.is_set():
+                    status["text"] = (
+                        "Espere: menú principal RUAT visible → pulse «Iniciar»"
+                    )
+                    if start_requested.wait(timeout=1.0):
+                        start_requested.clear()
+                        try:
+                            automator.ensure_connected()
+                            if automator.menu_principal_listo():
+                                flow_ready.set()
+                                status["text"] = (
+                                    "Listo — esperando trámites… "
+                                    "(menú RUAT verificado)"
+                                )
+                                log.info("Operador confirmó Iniciar — menú RUAT OK")
+                            else:
+                                motivo = automator.motivo_menu_no_listo()
+                                status["text"] = f"No listo: {motivo}"
+                                log.warning("Iniciar rechazado: %s", motivo)
+                        except Exception as exc:
+                            status["text"] = f"No se pudo verificar RUAT: {exc}"
+                            log.warning("Verificación menú falló: %s", exc)
+                    continue
+
                 payload = api.pendientes()
                 docs = payload.get("documentos") or []
                 if not docs:
-                    status["text"] = (
-                        "Esperando trámites… Menú RUAT: Contribuyente Natural → Registro"
-                    )
+                    if flow_ready.is_set():
+                        status["text"] = (
+                            "Esperando trámites… Menú RUAT listo "
+                            "(Contribuyente Natural → Registro)"
+                        )
                     stop.wait(poll)
                     continue
 
                 for doc in docs:
                     if stop.is_set():
+                        break
+                    if not automator.dry_run and not flow_ready.is_set():
                         break
                     doc_id = doc["id"]
                     ci = doc.get("numero_documento") or "?"
@@ -147,6 +180,22 @@ def main() -> int:
                     try:
                         if not automator.dry_run:
                             automator.ensure_connected()
+                            if not automator.menu_principal_listo():
+                                pant = automator.identificar_pantalla(automator._page_activa())
+                                # Permitir si ya está en flujo de alta
+                                if pant not in (
+                                    "submenu_contribuyente_natural",
+                                    "buscar",
+                                    "resultados_busqueda",
+                                    "recepcionar",
+                                    "datos_generales",
+                                    "domicilio",
+                                    "info_adicional",
+                                    "imagenes",
+                                    "confirmar",
+                                ):
+                                    flow_ready.clear()
+                                    raise RuntimeError(automator.motivo_menu_no_listo())
                         automator.procesar(doc)
                         api.resultado(
                             doc_id,
@@ -178,12 +227,12 @@ def main() -> int:
                                 "Se perdio el control de Firefox. Cierre ventanas extras, "
                                 "deje solo la del agente con el menú RUAT e inicie sesión ahí."
                             )
+                            flow_ready.clear()
                             try:
                                 automator.ensure_connected()
                             except Exception as recon:
                                 log.error("No se pudo reconectar Firefox: %s", recon)
                         else:
-                            # Enriquecer con paso/pantalla si el mensaje aún no lo trae
                             if "Paso «" not in msg and "pantalla=" not in msg.lower():
                                 msg = (
                                     f"Paso «{paso}» (pantalla={pant}): {msg}. "
@@ -226,11 +275,24 @@ def main() -> int:
 
     def on_quit() -> None:
         stop.set()
+        start_requested.set()  # despertar wait
         status["text"] = "Saliendo…"
 
     def on_logout() -> None:
         session.clear()
         log.info("Sesión cerrada por el usuario")
+
+    def on_iniciar() -> None:
+        """El operador confirma que el menú RUAT está listo."""
+        if fatal["msg"]:
+            show_error("Digitalizador Agent", f"Firefox no está listo:\n{fatal['msg']}")
+            return
+        start_requested.set()
+        status["text"] = "Verificando menú RUAT…"
+
+    def on_pausar() -> None:
+        flow_ready.clear()
+        status["text"] = "Pausado — pulse «Iniciar» cuando el menú RUAT esté visible"
 
     win = AgentWindow(
         base_url=base,
@@ -241,6 +303,8 @@ def main() -> int:
         ico_path=ico if ico.exists() else None,
         on_quit=on_quit,
         on_logout=on_logout,
+        on_iniciar=on_iniciar,
+        on_pausar=on_pausar,
     )
     # Dar un momento al worker para conectar / fallar
     threading.Timer(2.5, _check_fatal).start()
