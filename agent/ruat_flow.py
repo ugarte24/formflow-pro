@@ -178,15 +178,42 @@ class RuatAutomator:
 
     @staticmethod
     def _on_browser_dialog(dialog) -> None:
+        """
+        RUAT usa confirm()/alert() nativos. Mientras Playwright controla Firefox,
+        ESTE handler atiende TODOS los diálogos — también si el operador hace clic
+        a mano. Por eso no se puede dismiss por defecto: cancelaba Grabar y dejaba
+        la pantalla «bloqueada» (cada clic volvía a Cancelar el confirm).
+        """
         msg = dialog.message or ""
-        log.info("Diálogo navegador: %s", msg[:200])
+        dtype = getattr(dialog, "type", "") or ""
+        log.info("Diálogo navegador [%s]: %s", dtype, msg[:200])
+
+        # Modal Apoderado / Representante Legal → Cancelar
         if re.search(r"Apoderado|Representante\s*Legal", msg, re.I):
-            dialog.dismiss()  # Cancelar
-            log.info("Apoderado → Cancelar (dismiss)")
-        else:
-            # Por defecto no aceptar confirmaciones inesperadas
             dialog.dismiss()
-            log.warning("Diálogo no esperado → dismiss")
+            log.info("Apoderado → Cancelar (dismiss)")
+            return
+
+        # Confirmaciones peligrosas → no
+        if re.search(
+            r"cancelar\s*tr[aá]mite|salir\s*sin|descartar|eliminar\s*registro",
+            msg,
+            re.I,
+        ):
+            dialog.dismiss()
+            log.info("Confirmación destructiva → dismiss")
+            return
+
+        # alert / beforeunload / confirm de Grabar-Aceptar-continuar → aceptar
+        try:
+            dialog.accept()
+            log.info("Diálogo → accept")
+        except Exception as exc:
+            log.warning("No se pudo accept diálogo: %s — intento dismiss", exc)
+            try:
+                dialog.dismiss()
+            except Exception:
+                pass
 
     def _connect_persistent(self) -> None:
         assert self._pw is not None
@@ -324,7 +351,23 @@ class RuatAutomator:
             return "info_adicional"
         if "apoderado" in texto and tiene_alguno("desea registrar", "¿desea"):
             return "apoderado"
-        if tiene_alguno("domicilio legal", "búsqueda avanzada de domicilio", "busqueda avanzada de domicilio"):
+        # Antes del menú lateral: la BA comparte sidebar con «Registro Contribuyente Natural»
+        if tiene_alguno(
+            "busqueda avanzada direccion",
+            "búsqueda avanzada dirección",
+            "busqueda avanzada dirección",
+            "búsqueda avanzada direccion",
+        ) or (
+            tiene("tipo lugar")
+            and tiene("nombre lugar")
+            and tiene_alguno("criterios búsqueda", "criterios busqueda", "nueva búsqueda", "nueva busqueda")
+        ):
+            return "busqueda_avanzada"
+        if tiene_alguno(
+            "domicilio legal",
+            "búsqueda avanzada de domicilio",
+            "busqueda avanzada de domicilio",
+        ):
             return "domicilio"
         if tiene_alguno("datos generales", "estado civil") and tiene_alguno("fecha de nacimiento", "género", "genero"):
             return "datos_generales"
@@ -1702,11 +1745,26 @@ class RuatAutomator:
             except Exception:
                 pass
 
+        # Dar tiempo a que RUAT registre el check (Beehive/AJAX) antes de Grabar
+        page.wait_for_timeout(600)
+
         grabar = self._sel("recepcion", "boton_grabar", default="^Grabar$")
         if not self._click_boton_en_scopes(page, str(grabar)):
             raise RuntimeError("No se encontró botón Grabar en Recepcionar Documentación")
-        log.info("Recepcionar: Grabar OK")
-        page.wait_for_timeout(1000)
+        log.info("Recepcionar: Grabar pulsado (confirm nativo se acepta en _on_browser_dialog)")
+        # Esperar salida de Recepcionar → Datos Generales (o reintento del state machine)
+        try:
+            self._esperar_ui(
+                lambda p: self.identificar_pantalla(p) in ("datos_generales", "domicilio")
+                or "datos generales" in self._page_text(p),
+                timeout_ms=12000,
+                desc="Tras Grabar Recepcionar → Datos Generales",
+            )
+        except Exception:
+            log.warning(
+                "Tras Grabar aún no aparece Datos Generales — el state machine reintentará"
+            )
+        page.wait_for_timeout(400)
 
     def _datos_generales(self, page: Page, doc: dict) -> None:
         page = self._page_activa()
@@ -1782,39 +1840,53 @@ class RuatAutomator:
             return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
         return v
 
+    def _en_busqueda_avanzada(self, page: Page | None = None) -> bool:
+        page = page or self._page_activa()
+        return self.identificar_pantalla(page) == "busqueda_avanzada"
+
     def _domicilio_legal(self, page: Page, doc: dict) -> None:
         page = self._page_activa()
         dom = self.selectors.get("domicilio") or {}
 
         ba = dom.get("busqueda_avanzada") or {}
         if ba.get("obligatorio", True):
-            name = ba.get("link_name", "Búsqueda Avanzada")
-            opened = False
-            for scope in self._scopes(page):
-                try:
-                    link = scope.get_by_role("link", name=re.compile(str(name), re.I))
-                    if link.count() == 0:
-                        link = scope.get_by_text(re.compile(str(name), re.I))
-                    if link.count():
-                        link.first.click(timeout=8000, force=True)
-                        opened = True
-                        break
-                except Exception:
-                    continue
-            if not opened:
-                raise RuntimeError("No se encontró link Búsqueda Avanzada en Domicilio Legal")
-            page.wait_for_timeout(900)
-            log.info("Abierta Búsqueda Avanzada de domicilio")
+            # Si ya estamos en BA (reintento), no buscar el link otra vez
+            if not self._en_busqueda_avanzada(page):
+                name = ba.get("link_name", "Búsqueda Avanzada")
+                opened = False
+                for scope in self._scopes(page):
+                    try:
+                        link = scope.get_by_role("link", name=re.compile(str(name), re.I))
+                        if link.count() == 0:
+                            link = scope.get_by_text(re.compile(str(name), re.I))
+                        if link.count():
+                            link.first.click(timeout=8000, force=True)
+                            opened = True
+                            break
+                    except Exception:
+                        continue
+                if not opened:
+                    raise RuntimeError("No se encontró link Búsqueda Avanzada en Domicilio Legal")
+                page.wait_for_timeout(900)
+                log.info("Abierta Búsqueda Avanzada de domicilio")
+            else:
+                log.info("Ya en Búsqueda Avanzada — continúo criterios")
             self._domicilio_busqueda_avanzada(self._page_activa(), doc)
 
         page = self._page_activa()
+        # Tras Asociar volvemos a Domicilio Legal (no a BA)
+        if self._en_busqueda_avanzada(page):
+            raise RuntimeError(
+                "Tras Búsqueda Avanzada sigue en criterios (no se asoció dirección)."
+            )
+
         puerta = (doc.get("numero_puerta") or "").strip()
         label_puerta = dom.get("numero_puerta", "Número Puerta")
         label_sin = str(dom.get("sin_numero", "Sin Número"))
 
         if puerta and puerta.upper() not in {"S/N", "SN", "SIN NUMERO", "SIN NÚMERO"}:
             self._marcar_checkbox_por_texto(page, label_sin, marcar=False)
-            self._fill_if_empty(page, str(label_puerta), puerta)
+            self._fill_force(page, str(label_puerta), puerta)
             log.info("Número Puerta desde CI: %s", puerta)
         else:
             if not self._marcar_checkbox_por_texto(page, label_sin, marcar=True):
@@ -1827,6 +1899,15 @@ class RuatAutomator:
         log.info("Domicilio Legal → Aceptar OK")
         page.wait_for_timeout(800)
 
+    @staticmethod
+    def _normalizar_avenida_ocr(valor: str) -> str:
+        """Quita prefijos AV./AVENIDA del OCR; deja el nombre limpio para Nombre Lugar."""
+        v = (valor or "").strip()
+        if not v:
+            return ""
+        v = re.sub(r"^(AV\.?|AVENIDA|CALLE|C\.?)\s+", "", v, flags=re.I).strip()
+        return v
+
     def _domicilio_busqueda_avanzada(self, page: Page, doc: dict) -> None:
         """
         BUSQUEDA AVANZADA DIRECCION (Riberalta):
@@ -1835,13 +1916,32 @@ class RuatAutomator:
         3) Si no hay esa fila → Nombre=SIN NOMINAR → Buscar → Asociar BARRIO SIN NOMINAR + AVENIDA SIN NOMINAR
         """
         page = self._page_activa()
+        try:
+            page = self._esperar_ui(
+                lambda p: self._en_busqueda_avanzada(p)
+                or "tipo lugar" in self._page_text(p),
+                timeout_ms=10000,
+                desc="Búsqueda Avanzada Dirección",
+            )
+        except Exception:
+            page = self._page_activa()
+
         ba = (self.selectors.get("domicilio") or {}).get("busqueda_avanzada_form") or {}
-        avenida = (doc.get("avenida") or "").strip()
+        avenida = self._normalizar_avenida_ocr(doc.get("avenida") or "")
         barrio = (doc.get("barrio") or "").strip()
         fallback = str(ba.get("fallback_nombre") or "SIN NOMINAR")
         tipo = str(ba.get("tipo_lugar") or "AVENIDA")
         area = str(ba.get("area_default") or "URBANO")
         btn_buscar = str(ba.get("boton_buscar") or "^Buscar$")
+        label_tipo = str(ba.get("label_tipo_lugar", "Tipo Lugar"))
+        label_nombre = str(ba.get("label_nombre_lugar", "Nombre Lugar"))
+
+        log.info(
+            "BA domicilio: avenidaOCR=%r barrioOCR=%r → Tipo=%s",
+            avenida,
+            barrio,
+            tipo,
+        )
 
         if not self._marcar_checkbox_por_texto(page, area, marcar=True):
             for scope in self._scopes(page):
@@ -1853,36 +1953,44 @@ class RuatAutomator:
                 except Exception:
                     continue
 
-        label_tipo = ba.get("label_tipo_lugar", "Tipo Lugar")
-        if not self._select_por_label(page, str(label_tipo), tipo):
-            log.warning("No se pudo seleccionar Tipo Lugar=%s", tipo)
-
-        label_nombre = ba.get("label_nombre_lugar", "Nombre Lugar")
+        if not self._select_por_label(page, label_tipo, tipo):
+            if not self._ba_select_tipo_js(page, tipo):
+                raise RuntimeError(f"No se pudo seleccionar Tipo Lugar={tipo}")
+        log.info("BA: Tipo Lugar = %s", tipo)
 
         def _set_nombre(valor: str) -> None:
-            if not self._fill_if_empty(page, str(label_nombre), valor):
-                # Forzar aunque no esté vacío
-                for scope in self._scopes(page):
-                    try:
-                        loc = scope.get_by_label(re.compile(str(label_nombre), re.I))
-                        if loc.count():
-                            self._escribir_en_input(loc.first, valor, page)
-                            return
-                    except Exception:
-                        continue
-                raise RuntimeError(f"No se pudo escribir Nombre Lugar={valor}")
+            if not self._fill_force(page, label_nombre, valor):
+                if not self._ba_set_nombre_js(page, valor):
+                    raise RuntimeError(f"No se pudo escribir Nombre Lugar={valor}")
+            log.info("BA: Nombre Lugar = %s", valor)
 
         def _click_buscar() -> None:
-            if not self._click_boton_en_scopes(page, btn_buscar):
+            page_local = self._page_activa()
+            if not self._click_boton_en_scopes(page_local, btn_buscar):
                 raise RuntimeError("No se encontró Buscar en Búsqueda Avanzada")
-            page.wait_for_timeout(1200)
+            log.info("BA: Buscar pulsado")
+            page_local.wait_for_timeout(1500)
+            # Esperar tabla Resultados / Asociar
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                p2 = self._page_activa()
+                txt = self._page_text(p2)
+                if "asociar" in txt or "resultados" in txt:
+                    return
+                try:
+                    p2.wait_for_timeout(400)
+                except Exception:
+                    time.sleep(0.4)
+            log.warning("BA: tras Buscar no aparece tabla Resultados aún")
 
         if not avenida:
             log.warning("Sin avenida OCR → directo a SIN NOMINAR")
         else:
             _set_nombre(avenida)
             _click_buscar()
-            if self._domicilio_asociar_barrio_avenida(self._page_activa(), barrio=barrio, avenida=avenida):
+            if self._domicilio_asociar_barrio_avenida(
+                self._page_activa(), barrio=barrio, avenida=avenida
+            ):
                 log.info("Asociado barrio='%s' avenida='%s'", barrio, avenida)
                 return
             log.info(
@@ -1890,6 +1998,8 @@ class RuatAutomator:
                 barrio,
                 avenida,
             )
+            # Volver a criterios si hace falta (Nueva Búsqueda)
+            self._ba_nueva_busqueda_si_hace_falta(self._page_activa())
 
         _set_nombre(fallback)
         _click_buscar()
@@ -1900,6 +2010,120 @@ class RuatAutomator:
         raise RuntimeError(
             "No se pudo asociar dirección (ni barrio+avenida del CI ni SIN NOMINAR)."
         )
+
+    def _ba_nueva_busqueda_si_hace_falta(self, page: Page) -> None:
+        """Si hay resultados, vuelve a criterios con «Nueva Búsqueda» para el fallback."""
+        txt = self._page_text(page)
+        if "nueva búsqueda" not in txt and "nueva busqueda" not in txt:
+            return
+        if "asociar" not in txt and "resultados" not in txt:
+            return
+        ba = (self.selectors.get("domicilio") or {}).get("busqueda_avanzada_form") or {}
+        name = str(ba.get("link_nueva_busqueda") or "Nueva Búsqueda")
+        if self._click_boton_en_scopes(page, name) or self._click_por_nombre(page, name):
+            log.info("BA: Nueva Búsqueda (para fallback)")
+            page.wait_for_timeout(800)
+
+    def _ba_select_tipo_js(self, page: Page, tipo: str) -> bool:
+        js = """
+        (tipo) => {
+          const wanted = (tipo || '').toUpperCase();
+          const selects = Array.from(document.querySelectorAll('select'));
+          for (const sel of selects) {
+            const row = sel.closest('tr') || sel.parentElement;
+            const txt = ((row && row.innerText) || '').toLowerCase();
+            if (!txt.includes('tipo lugar') && !txt.includes('tipo de lugar')) continue;
+            const opts = Array.from(sel.options);
+            const hit = opts.find(o => (o.text || '').trim().toUpperCase() === wanted)
+              || opts.find(o => (o.text || '').toUpperCase().includes(wanted));
+            if (!hit) return { ok: false, reason: 'no-opt', n: opts.length };
+            sel.value = hit.value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            return { ok: true, text: hit.text, value: hit.value };
+          }
+          return { ok: false, reason: 'no-select', n: selects.length };
+        }
+        """
+        for scope in self._scopes(page):
+            try:
+                res = scope.evaluate(js, tipo)
+                if isinstance(res, dict) and res.get("ok"):
+                    log.info("BA Tipo Lugar JS → %s", res.get("text"))
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _ba_set_nombre_js(self, page: Page, valor: str) -> bool:
+        js = """
+        (valor) => {
+          const okType = (t) => {
+            t = (t || 'text').toLowerCase();
+            return ['text','','search','tel'].includes(t);
+          };
+          const inputs = Array.from(document.querySelectorAll('input')).filter(
+            (i) => okType(i.type) && i.offsetParent !== null && !i.disabled
+          );
+          for (const inp of inputs) {
+            const row = inp.closest('tr') || inp.parentElement;
+            const txt = ((row && row.innerText) || '').toLowerCase();
+            if (!txt.includes('nombre lugar') && !txt.includes('nombre de lugar')) continue;
+            inp.focus();
+            inp.value = '';
+            inp.value = valor;
+            for (const ev of ['input', 'change', 'keyup', 'blur']) {
+              try { inp.dispatchEvent(new Event(ev, { bubbles: true })); } catch (e) {}
+            }
+            return { ok: true, value: inp.value, name: inp.name || '' };
+          }
+          return { ok: false, n: inputs.length };
+        }
+        """
+        for scope in self._scopes(page):
+            try:
+                res = scope.evaluate(js, valor)
+                if isinstance(res, dict) and res.get("ok"):
+                    log.info("BA Nombre Lugar JS → %r", res.get("value"))
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _fill_force(self, page: Page, label_pattern: str, value: str) -> bool:
+        """Escribe siempre el valor (aunque el campo ya tenga texto)."""
+        if value is None:
+            return False
+        value = str(value)
+        label_rx = re.compile(str(label_pattern), re.I)
+        css = "input[type='text'], input:not([type]), input[type=''], input[type='search'], input[type='tel']"
+
+        for scope in self._scopes(page):
+            try:
+                loc = scope.get_by_label(label_rx)
+                if loc.count():
+                    if self._escribir_en_input(loc.first, value, page):
+                        return True
+            except Exception:
+                pass
+            try:
+                filas = scope.locator("tr, label, div, td").filter(has_text=label_rx)
+                n = min(filas.count(), 8)
+                for i in range(n):
+                    fila = filas.nth(i)
+                    try:
+                        txt = (fila.inner_text(timeout=600) or "").strip()
+                        if len(txt) > 120:
+                            continue
+                    except Exception:
+                        continue
+                    el = self._input_texto_visible(fila, css, 0)
+                    if el is None:
+                        continue
+                    if self._escribir_en_input(el, value, page):
+                        return True
+            except Exception:
+                continue
+        return False
 
     def _domicilio_asociar_barrio_avenida(self, page: Page, *, barrio: str, avenida: str) -> bool:
         """En la tabla Resultados, Asociar solo si coinciden barrio y avenida del CI."""
@@ -2291,6 +2515,33 @@ class RuatAutomator:
                         return True
                     except Exception:
                         continue
+            except Exception:
+                continue
+        # Fallback: select en fila con el label
+        for scope in self._scopes(page):
+            try:
+                filas = scope.locator("tr, div, td, label").filter(has_text=label_rx)
+                n = min(filas.count(), 8)
+                for i in range(n):
+                    fila = filas.nth(i)
+                    try:
+                        txt = (fila.inner_text(timeout=600) or "").strip()
+                        if len(txt) > 120:
+                            continue
+                    except Exception:
+                        continue
+                    sel = fila.locator("select")
+                    if not sel.count():
+                        continue
+                    try:
+                        sel.first.select_option(label=opt_rx, timeout=5000)
+                        return True
+                    except Exception:
+                        try:
+                            sel.first.select_option(label=str(option_label), timeout=5000)
+                            return True
+                        except Exception:
+                            continue
             except Exception:
                 continue
         # Fallback: select que contenga la opción

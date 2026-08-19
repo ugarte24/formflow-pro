@@ -191,8 +191,10 @@ function Verificar() {
         operator_id: sesion.userId,
         evento: "Datos confirmados — en cola del agente (misma cuenta)",
       });
-      toast.success("Datos enviados. Inicie sesión en Digitalizador Agent con su misma cuenta…");
+      toast.success("Datos enviados. Esperando al agente…");
       await refetch();
+      // En móvil suele quedar abajo del formulario: subir al panel de estado / Reintentar
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "No se pudo enviar");
     } finally {
@@ -275,16 +277,16 @@ function Verificar() {
       ) : null}
 
       {bloqueado ? (
-        <div className="panel mb-4 p-5">
+        <div className="panel sticky top-[4.5rem] z-10 mb-4 border-primary/25 p-4 shadow-sm sm:static sm:top-auto sm:p-5 sm:shadow-none">
           <p className="label-caps">Estado del envío</p>
-          <h2 className="mt-1 text-lg font-semibold">
+          <h2 className="mt-1 text-base font-semibold sm:text-lg">
             {doc.status === "registrado"
               ? "Registrado en el sistema empresarial"
               : doc.status === "formulario_completado"
                 ? "Formulario completado — revise antes de guardar"
                 : doc.status === "enviado_pc"
                   ? "El agente lo recibió — procesando en Firefox…"
-                  : "En cola — esperando al agente…"}
+                  : "Datos enviados — esperando al agente…"}
           </h2>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {doc.status === "formulario_completado"
@@ -303,7 +305,7 @@ function Verificar() {
               type="button"
               disabled={guardando}
               onClick={() => void reencolar()}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-60"
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-3 text-sm font-semibold hover:bg-muted disabled:opacity-60 sm:inline-flex sm:w-auto sm:py-2.5 sm:font-medium"
             >
               {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
               Reintentar envío
@@ -479,12 +481,26 @@ function Verificar() {
           </div>
         </>
       ) : (
-        <button
-          onClick={() => router.navigate({ to: "/inicio" })}
-          className="mt-4 w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium"
-        >
-          Volver al inicio
-        </button>
+        <div className="mt-4 space-y-2.5 pb-2">
+          {doc.status === "confirmado" || doc.status === "enviado_pc" ? (
+            <button
+              type="button"
+              disabled={guardando}
+              onClick={() => void reencolar()}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground disabled:opacity-60 sm:hidden"
+            >
+              {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              Reintentar envío
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => router.navigate({ to: "/inicio" })}
+            className="w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm font-medium"
+          >
+            Volver al inicio
+          </button>
+        </div>
       )}
     </AppShell>
   );

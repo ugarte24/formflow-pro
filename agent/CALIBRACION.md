@@ -121,6 +121,7 @@ Si no hay filas foráneas → **Nuevo Contribuyente**.
   | FACTURA LUZ/AGUA | No marcar |
 - **Datos Tramitador:** dejar vacío — **no** usar link «Registrar» (sin Gestor Trámite)
 - **Botones:** **Grabar** (no Limpiar)
+- **Importante:** RUAT muestra `confirm()` al Grabar. El agente debe **Aceptar** ese diálogo (no Cancelar). Si se cancela, la pantalla parece «bloqueada» y ni el operador puede Grabar mientras Firefox está bajo control del agente.
 
 Nota: en esta captura no apareció pantalla Asociar (alta nueva). Si tras Buscar hay coincidencia, sigue pendiente documentar Asociar.
 
@@ -163,9 +164,10 @@ Nota: en esta captura no apareció pantalla Asociar (alta nueva). Si tras Buscar
   |---|---|
   | Área Municipio | **URBANO** |
   | Tipo Lugar | **AVENIDA** |
-  | Nombre Lugar | avenida del CI (ej. `PAQUIO`) |
+  | Nombre Lugar | avenida del CI (ej. `PAQUIO`) — **forzar escritura** (no dejar valor previo) |
 - **Botón:** **Buscar**
 - **Links:** Anterior · Nueva Búsqueda
+- **Detección:** pantalla `busqueda_avanzada` (título BUSQUEDA AVANZADA DIRECCION). No confundir con el menú lateral.
 
 #### Regla de negocio (confirmada)
 

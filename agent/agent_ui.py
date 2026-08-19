@@ -355,7 +355,10 @@ def run_startup_update(base_url: str) -> bool:
     if err["msg"]:
         show_error(
             "Digitalizador Agent",
-            f"No se pudo actualizar automáticamente:\n{err['msg']}\n\nSe continuará con la versión actual.",
+            f"No se pudo actualizar automáticamente:\n{err['msg']}\n\n"
+            "Se continuará con la versión actual.\n\n"
+            "Si se repite: Admin → Descargar agente → Instalar.bat "
+            "(cierre el agente antes).",
         )
         return False
     return result["ok"]
