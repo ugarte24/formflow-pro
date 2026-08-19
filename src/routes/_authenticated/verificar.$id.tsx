@@ -267,14 +267,39 @@ function Verificar() {
       }
     >
       {doc.error_message && !bloqueado ? (
-        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-          <div className="text-sm text-destructive">
-            <p className="font-semibold">Error del agente</p>
-            <p className="mt-0.5 text-xs opacity-90">{doc.error_message}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Corrija si hace falta y vuelva a enviar al PC.</p>
-          </div>
-        </div>
+        (() => {
+          const yaRegistrado = /ya tiene un registro|ya registrado en riberalta/i.test(
+            doc.error_message,
+          );
+          return (
+            <div
+              className={`mb-4 flex items-start gap-2.5 rounded-xl border px-4 py-3 ${
+                yaRegistrado
+                  ? "border-warning/40 bg-warning/15"
+                  : "border-destructive/40 bg-destructive/10"
+              }`}
+            >
+              <AlertTriangle
+                className={`mt-0.5 h-4 w-4 shrink-0 ${
+                  yaRegistrado ? "text-warning-foreground" : "text-destructive"
+                }`}
+              />
+              <div
+                className={`text-sm ${yaRegistrado ? "text-warning-foreground" : "text-destructive"}`}
+              >
+                <p className="font-semibold">
+                  {yaRegistrado ? "Ya registrado en Riberalta" : "Error del agente"}
+                </p>
+                <p className="mt-0.5 text-xs opacity-90">{doc.error_message}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {yaRegistrado
+                    ? "No se inició un alta nueva. En RUAT use Modificación Contribuyente Natural si corresponde."
+                    : "Corrija si hace falta y vuelva a enviar al PC."}
+                </p>
+              </div>
+            </div>
+          );
+        })()
       ) : null}
 
       {bloqueado ? (

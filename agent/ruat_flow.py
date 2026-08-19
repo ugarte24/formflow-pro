@@ -958,17 +958,47 @@ class RuatAutomator:
             log.info("Sin registro usable → Nuevo Contribuyente")
 
         def fase_nuevo() -> None:
-            self._click_nuevo_contribuyente(self._page_activa())
+            p = self._page_activa()
+            # Seguridad: no iniciar alta si apareció RIBERALTA en Resultados
+            if self._resultado_tiene_municipio_local(p):
+                nombre = self._nombre_en_resultado(p) or ""
+                ci = doc.get("numero_documento") or ""
+                detalle = f"CI {ci}" + (f", {nombre}" if nombre else "")
+                raise ContribuyenteYaRegistrado(
+                    f"El contribuyente ya tiene un registro en Riberalta ({detalle}). "
+                    "No se inició un nuevo alta. Use Modificación si corresponde."
+                )
+            self._click_nuevo_contribuyente(p)
 
         # Tras Nuevo puede ir directo a recepcionar
         if self.identificar_pantalla(page) != "recepcionar":
-            self._ejecutar_paso(
-                "nuevo_contribuyente",
-                fase_nuevo,
-                destinos=("recepcionar", "datos_generales"),
-                max_intentos=2,
-                recuperar_menu=False,
-            )
+            try:
+                self._ejecutar_paso(
+                    "nuevo_contribuyente",
+                    fase_nuevo,
+                    destinos=("recepcionar", "datos_generales"),
+                    max_intentos=2,
+                    recuperar_menu=False,
+                )
+            except ContribuyenteYaRegistrado:
+                raise
+            except Exception as exc:
+                # Si sigue en resultados y hay RIBERALTA, es "ya registrado" (no fallo genérico)
+                p2 = self._page_activa()
+                if self._resultado_tiene_municipio_local(p2) or (
+                    self.identificar_pantalla(p2) == "resultados_busqueda"
+                    and "riberalta" in self._page_text(p2)
+                ):
+                    nombre = self._nombre_en_resultado(p2) or (
+                        f"{doc.get('nombres') or ''} {doc.get('apellidos') or ''}".strip()
+                    )
+                    ci = doc.get("numero_documento") or ""
+                    detalle = f"CI {ci}" + (f", {nombre}" if nombre else "")
+                    raise ContribuyenteYaRegistrado(
+                        f"El contribuyente ya tiene un registro en Riberalta ({detalle}). "
+                        "No se inició un nuevo alta. Use Modificación si corresponde."
+                    ) from exc
+                raise
 
         self._ejecutar_paso(
             "recepcionar",
@@ -1425,61 +1455,154 @@ class RuatAutomator:
     def _clasificar_resultado_busqueda(self, page: Page) -> str:
         """
         Tras Buscar:
-        - ya_en_municipio: Resultados con Gobierno Municipal = RIBERALTA
-        - asociar: había link Asociar (otro municipio) — ahora se trata como alta nueva
+        - ya_en_municipio: Resultados con Gobierno Municipal = RIBERALTA → detener
+        - asociar: había link Asociar (otro municipio) — se trata como alta nueva
         - nuevo: sin fila local / Nuevo Contribuyente
         """
         mun = str(self._sel("buscar", "municipio_local", default="RIBERALTA"))
-        page.wait_for_timeout(400)
+        page = self._page_activa()
+        # Esperar tabla Resultados (puede tardar / estar en iframe)
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            if self._resultado_tiene_municipio_local(page, mun):
+                return "ya_en_municipio"
+            txt = self._page_text(page)
+            if "resultados" in txt or self._hay_coincidencia(page):
+                break
+            try:
+                page.wait_for_timeout(400)
+            except Exception:
+                time.sleep(0.4)
+            page = self._page_activa()
 
-        # ¿Hay tabla de resultados con el municipio local?
-        if page.get_by_text(re.compile(r"Resultados", re.I)).count():
-            rows = page.locator("table tr")
-            for i in range(min(rows.count(), 30)):
-                txt = (rows.nth(i).inner_text() or "").strip()
-                if not txt:
-                    continue
-                upper = txt.upper()
-                if mun.upper() in upper and (
-                    re.search(r"\bCI\b", upper) or re.search(r"\d{5,}", txt)
-                ):
-                    # Evitar fila de encabezado
-                    if "NOMBRE COMPLETO" in upper and "PMC" in upper:
-                        continue
-                    log.info("Resultado local detectado: %s", txt.replace("\n", " ")[:120])
-                    return "ya_en_municipio"
-
+        if self._resultado_tiene_municipio_local(page, mun):
+            return "ya_en_municipio"
         if self._hay_coincidencia(page):
             return "asociar"
         return "nuevo"
 
+    def _resultado_tiene_municipio_local(self, page: Page, municipio: str | None = None) -> bool:
+        """True si en Resultados aparece el municipio local (p. ej. RIBERALTA)."""
+        mun = (municipio or str(self._sel("buscar", "municipio_local", default="RIBERALTA"))).upper().strip()
+        if not mun:
+            return False
+        js = """
+        (mun) => {
+          const munU = (mun || '').toUpperCase();
+          const body = (document.body && document.body.innerText || '');
+          const bodyU = body.toUpperCase();
+          if (!bodyU.includes('RESULTADOS') && !bodyU.includes(munU)) {
+            return { ok: false, reason: 'no-resultados' };
+          }
+          const rows = Array.from(document.querySelectorAll('table tr'));
+          for (const tr of rows) {
+            const t = ((tr.innerText || '').replace(/\\s+/g, ' ')).trim();
+            const u = t.toUpperCase();
+            if (!u.includes(munU)) continue;
+            // Encabezado de tabla
+            if (u.includes('NOMBRE COMPLETO') && (u.includes('PMC') || u.includes('GOBIERNO'))) continue;
+            if (u.includes('GOBIERNO MUNICIPAL') && u.includes('DOCUMENTO') && !/\\d{5,}/.test(t)) continue;
+            // Fila de datos: municipio local + CI / dígitos / nombre
+            const tieneDoc = /\\bCI\\b/.test(u) || /\\d{5,}/.test(t);
+            const tieneGob = u.includes('GOBIERNO MUNICIPAL') || u.includes(munU);
+            if (tieneDoc && tieneGob) {
+              return { ok: true, row: t.slice(0, 180) };
+            }
+            if (u.includes(munU) && tieneDoc) {
+              return { ok: true, row: t.slice(0, 180) };
+            }
+          }
+          // Texto suelto: Resultados + RIBERALTA + CI nnnnn
+          if (bodyU.includes('RESULTADOS') && bodyU.includes(munU) && /\\bCI\\s*\\d{4,}/i.test(body)) {
+            return { ok: true, row: 'text-match' };
+          }
+          if (bodyU.includes('RESULTADOS') && new RegExp('GOBIERNO\\\\s+MUNICIPAL[^\\\\n]{0,60}' + munU).test(bodyU)) {
+            return { ok: true, row: 'gobierno-match' };
+          }
+          return { ok: false, n: rows.length };
+        }
+        """
+        for scope in self._scopes(page):
+            try:
+                res = scope.evaluate(js, mun)
+                if isinstance(res, dict) and res.get("ok"):
+                    log.info(
+                        "Resultado local %s detectado: %s",
+                        mun,
+                        str(res.get("row") or "")[:120],
+                    )
+                    return True
+            except Exception as exc:
+                log.debug("municipio local JS: %s", exc)
+
+            try:
+                rows = scope.locator("table tr")
+                n = min(rows.count(), 40)
+                for i in range(n):
+                    try:
+                        txt = (rows.nth(i).inner_text(timeout=600) or "").strip()
+                    except Exception:
+                        continue
+                    if not txt:
+                        continue
+                    upper = txt.upper()
+                    if mun not in upper:
+                        continue
+                    if "NOMBRE COMPLETO" in upper and ("PMC" in upper or "GOBIERNO" in upper):
+                        continue
+                    if re.search(r"\bCI\b", upper) or re.search(r"\d{5,}", txt):
+                        log.info("Resultado local %s (pw): %s", mun, txt.replace("\n", " ")[:120])
+                        return True
+            except Exception:
+                continue
+        return False
+
     def _nombre_en_resultado(self, page: Page) -> str:
         try:
-            # Segunda/tercera celda típica: Nombre Completo
-            rows = page.locator("table").locator("tr").filter(has_text=re.compile(r"CI\s*\d+", re.I))
-            if rows.count():
+            for scope in self._scopes(page):
+                rows = scope.locator("table").locator("tr").filter(
+                    has_text=re.compile(r"CI\s*\d+", re.I)
+                )
+                if rows.count() == 0:
+                    continue
                 cells = rows.first.locator("td")
                 if cells.count() >= 3:
                     return (cells.nth(2).inner_text() or "").strip()
+                # Sin celdas claras: texto de la fila
+                return (rows.first.inner_text() or "").replace("\n", " ").strip()[:80]
         except Exception:
             pass
         return ""
 
     def _click_nuevo_contribuyente(self, page: Page) -> None:
         name = self._sel("buscar", "boton_nuevo", default="^Nuevo Contribuyente$")
-        btn = page.get_by_role("button", name=re.compile(str(name), re.I))
-        if btn.count() == 0:
-            btn = page.get_by_text(re.compile(r"Nuevo\s+Contribuyente", re.I))
-        if btn.count():
-            btn.first.click()
+        if not self._click_boton_en_scopes(page, str(name)):
+            # Texto suelto
+            for scope in self._scopes(page):
+                try:
+                    btn = scope.get_by_text(re.compile(r"Nuevo\s+Contribuyente", re.I))
+                    if btn.count():
+                        btn.first.click(timeout=8000, force=True)
+                        page.wait_for_timeout(900)
+                        log.info("Clic en Nuevo Contribuyente")
+                        return
+                except Exception:
+                    continue
+            log.warning("No se encontró Nuevo Contribuyente — se asume alta ya iniciada")
+        else:
             page.wait_for_timeout(900)
             log.info("Clic en Nuevo Contribuyente")
-        else:
-            log.warning("No se encontró Nuevo Contribuyente — se asume alta ya iniciada")
 
     def _hay_coincidencia(self, page: Page) -> bool:
         name = self._sel("asociar", "link_name", default="^Asociar$")
-        return page.get_by_role("link", name=re.compile(str(name), re.I)).count() > 0
+        pat = re.compile(str(name), re.I)
+        for scope in self._scopes(page):
+            try:
+                if scope.get_by_role("link", name=pat).count() > 0:
+                    return True
+            except Exception:
+                continue
+        return False
 
     def _click_asociar(self, page: Page) -> None:
         name = self._sel("asociar", "link_name", default="^Asociar$")
