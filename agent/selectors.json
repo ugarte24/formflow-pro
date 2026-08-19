@@ -1,5 +1,5 @@
 {
-  "_comentario": "Calibrado parcialmente — Riberalta Contribuyentes v6.44.123. Ver CALIBRACION.md",
+  "_comentario": "Riberalta Contribuyentes v6.44.123. Preferir name/id de dumps (python inspect_page.py). Flujo: Nuevo Contribuyente (no Asociar). Ver CALIBRACION.md",
   "contribuyente_natural": {
     "link_role": "link",
     "link_name": "Contribuyente\\s+Natural"

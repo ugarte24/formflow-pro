@@ -166,6 +166,8 @@ def main() -> int:
                     except Exception as exc:
                         log.exception("Error automatizando %s", doc_id)
                         msg = str(exc)
+                        paso = getattr(automator, "_paso_actual", "?")
+                        pant = getattr(automator, "_ultima_pantalla", "?")
                         if "greenlet" in msg.lower() or "Cannot switch" in msg:
                             msg = (
                                 "Error interno de hilos del agente. Actualice a la última versión "
@@ -180,11 +182,18 @@ def main() -> int:
                                 automator.ensure_connected()
                             except Exception as recon:
                                 log.error("No se pudo reconectar Firefox: %s", recon)
+                        else:
+                            # Enriquecer con paso/pantalla si el mensaje aún no lo trae
+                            if "Paso «" not in msg and "pantalla=" not in msg.lower():
+                                msg = (
+                                    f"Paso «{paso}» (pantalla={pant}): {msg}. "
+                                    "Cierre el trámite a medias en RUAT o vuelva al menú y use Reintentar envío."
+                                )
                         try:
                             api.resultado(doc_id, "error_automatizacion", msg[:500])
                         except Exception as report_exc:
                             log.error("No se pudo reportar error: %s", report_exc)
-                        status["text"] = f"Error CI {ci}"
+                        status["text"] = f"Error CI {ci} · {paso}"
             except Exception as exc:
                 if stop.is_set():
                     break

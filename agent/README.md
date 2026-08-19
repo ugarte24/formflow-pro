@@ -65,23 +65,24 @@ El agente hace polling a `GET /api/public/agente/pendientes` (Bearer) y reporta 
 
 ## Flujo RUAT automatizado
 
-1. Menú → Contribuyente Natural  
+1. Menú → Contribuyente Natural → Registro Contribuyente Natural  
 2. Buscar CI (tipo cédula, depto en blanco)  
-3. Si hay coincidencia → **Asociar** y completar faltantes  
-4. Marcar DOCUMENTO DE IDENTIDAD → Grabar  
-5. Datos generales (depto en blanco)  
-6. Domicilio legal  
-7. Modal apoderado → **Cancelar**  
-8. Celular aleatorio (viene en el payload)  
-9. Subir **solo fotografía** (≤ 90 KB)  
-10. Reportar `formulario_completado` (modo seguro: el operador guarda)
+3. Si ya está en Riberalta → avisar y detener  
+4. Si no / otros municipios → **Nuevo Contribuyente** (no Asociar)  
+5. Marcar DOCUMENTO DE IDENTIDAD → Grabar  
+6. Datos generales (depto en blanco)  
+7. Domicilio legal (Búsqueda Avanzada)  
+8. Modal apoderado → **Cancelar**  
+9. Celular aleatorio (viene en el payload)  
+10. Subir **solo fotografía** (≤ 90 KB) → Procesar/Finalizar si aparece  
+11. Imprimir Reporte → reportar `formulario_completado` (modo seguro: el operador pulsa Grabar)
 
 ## Calibración
 
 ### Método rápido (recomendado)
 
 1. Configura `agent/.env` (`FIREFOX_MODE=persistent`, opcional `RUAT_START_URL`).
-2. Abre el inspector:
+2. Abre el inspector (recorre **página + iframes** y guarda JSON):
 
 ```powershell
 cd agent
@@ -89,10 +90,10 @@ cd agent
 python inspect_page.py --wait 30
 ```
 
-3. En los 30 s navega manualmente a **una** pantalla del flujo (ej. Buscar Contribuyente).
-4. El script imprime links, botones, labels, inputs y selects reales.
-5. Copia esos textos a `selectors.json` (ver tabla abajo).
-6. Repite por cada pantalla: buscar → asociar → recepción → datos → domicilio → apoderado → celular → foto.
+3. En los 30 s navega manualmente a **una** pantalla del flujo (ej. Datos Generales).
+4. El script imprime controles y guarda `agent/dumps/pantalla-<codigo>-<timestamp>.json`.
+5. Copia `name`/`id`/textos estables a `selectors.json`.
+6. Repite por cada pantalla: buscar → recepción → datos → domicilio → info → foto → confirmar.
 
 ### Qué editar en `selectors.json`
 
@@ -102,10 +103,9 @@ python inspect_page.py --wait 30
 | Buscar | `buscar.input_documento` | CSS del input CI (`name`/`id` del dump) |
 | Buscar | `buscar.tipo_documento_label` | Texto de la opción del select |
 | Buscar | `buscar.boton_buscar` | Regex del botón, ej. `^Buscar$` |
-| Coincidencia | `asociar.link_name` | Texto del link Asociar |
 | Recepción | `recepcion.check_documento` / `boton_grabar` | Texto del check y botón |
 | Datos | `datos_generales.*` | Texto de cada label |
-| Domicilio | `domicilio.*` | Labels de zona/puerta |
+| Domicilio | `domicilio.*` | Labels de zona/puerta / BA |
 | Apoderado | `apoderado.boton_cancelar` | Texto del botón Cancelar del modal |
 | Celular | `info_adicional.celular` | Label del teléfono |
 | Foto | `imagenes.input_file` | CSS del `input[type=file]` |
@@ -114,10 +114,6 @@ python inspect_page.py --wait 30
 
 - Usa `^Texto$` cuando el botón debe coincidir exacto (evita clics en “Buscar otro”).
 - Si el label tiene tilde o `(a)`, prueba alternativas con `|`: `Número|Numero|Nro`.
-- Tras editar JSON, reinicia `python main.py` (se carga al inicio).
-- Si falla un paso, en la app verás `error_automatizacion` con el mensaje; ajusta solo esa clave.
-- No hace falta tocar `ruat_flow.py` salvo casos raros (iframes, shadow DOM).
-
-### Alternativa manual (DevTools)
-
-En Firefox: clic derecho → Inspeccionar → anota `id`/`name` del input y el texto visible del botón/label → pégalo en `selectors.json`.
+- Tras editar JSON, reinicia el agente (se carga al inicio).
+- Si falla un paso, en la app verás `error_automatizacion` con **paso + pantalla**; ajusta solo esa clave.
+- El agente busca controles en **iframes**; si falla, regenerá el dump de esa pantalla.

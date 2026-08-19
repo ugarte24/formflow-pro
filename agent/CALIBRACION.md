@@ -17,7 +17,7 @@ Municipio: **Gobierno Municipal de Riberalta** · App: Contribuyentes · Ver. **
 | 10 | Domicilio post-Asociar | **ok** | Puerta o Sin Número → Aceptar |
 | 11 | Modal apoderado | **ok** | «¿Desea registrar un Apoderado…?» → **Cancelar** |
 | 12 | Información adicional | **ok** | Solo celular aleatorio → Aceptar |
-| 13 | Registrar imágenes | **parcial** | Solo Fotografía ≤90 KB; falta Aceptar final |
+| 13 | Registrar imágenes | **ok** | Solo Fotografía ≤90 KB; Aceptar final; dumps con `inspect_page.py` (frames) |
 | 14 | Diálogo carpeta Imágenes | **ok** | No usar carpeta local; inyectar `foto_url` del escaneo |
 | 15 | Seleccionar + Abrir | **ok** | Equivale a `set_input_files` con la foto del trámite |
 | 16 | Editar Fotografía → Procesar | **ok** | Cuadro remarcado → Procesar |

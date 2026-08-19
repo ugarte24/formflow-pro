@@ -74,6 +74,8 @@ class RuatAutomator:
         self.dry_run = os.getenv("DRY_RUN", "").strip().lower() in {"1", "true", "yes"}
         self.ruat_url = (os.getenv("RUAT_START_URL", "").strip() or RUAT_MENU_DEFAULT)
         self.mode = (os.getenv("FIREFOX_MODE") or "persistent").strip().lower()
+        self._paso_actual = "idle"
+        self._ultima_pantalla = "desconocida"
 
     def connect(self) -> None:
         self._pw = sync_playwright().start()
@@ -809,7 +811,12 @@ class RuatAutomator:
         )
 
     def procesar(self, doc: dict) -> None:
+        """
+        Máquina de estados: identificar pantalla → acción del paso → verificar destino.
+        Modo seguro: llega hasta Imprimir Reporte; no pulsa Grabar final.
+        """
         self.ensure_connected()
+        self._paso_actual = "inicio"
         page = self._page_activa()
 
         if self.dry_run:
@@ -821,11 +828,17 @@ class RuatAutomator:
             )
             return
 
-        # Identificar ventana y seguir el flujo hasta Buscar
-        page = self._asegurar_pantalla_buscar(page)
-        log.info("Listo en pantalla: %s", self.identificar_pantalla(page))
+        def fase_llegar_y_buscar() -> None:
+            p = self._asegurar_pantalla_buscar(self._page_activa())
+            self._buscar_contribuyente(p, doc)
 
-        self._buscar_contribuyente(page, doc)
+        self._ejecutar_paso(
+            "buscar",
+            fase_llegar_y_buscar,
+            destinos=("resultados_busqueda", "buscar", "recepcionar"),
+            max_intentos=3,
+            recuperar_menu=True,
+        )
 
         page = self._page_activa()
         rama = self._clasificar_resultado_busqueda(page)
@@ -840,28 +853,83 @@ class RuatAutomator:
                 "No se inició un nuevo alta. Use Modificación si corresponde."
             )
 
-        # Otros municipios o sin resultados → siempre Nuevo Contribuyente (ya no Asociar)
         self._validar_datos_ocr(doc)
         if rama == "asociar":
             log.info("Otros municipios en Resultados → Nuevo Contribuyente (sin Asociar)")
         else:
             log.info("Sin registro usable → Nuevo Contribuyente")
-        self._click_nuevo_contribuyente(page)
 
-        page = self._page_activa()
-        self._recepcionar_documentacion(page)
-        page = self._page_activa()
-        self._datos_generales(page, doc)
-        page = self._page_activa()
-        self._domicilio_legal(page, doc)
-        page = self._page_activa()
-        self._cancelar_apoderado(page)
-        page = self._page_activa()
-        self._info_adicional(page, doc)
-        page = self._page_activa()
-        self._subir_fotografia(page, doc)
-        page = self._page_activa()
-        self._confirmar_tramite_imprimir(page)
+        def fase_nuevo() -> None:
+            self._click_nuevo_contribuyente(self._page_activa())
+
+        # Tras Nuevo puede ir directo a recepcionar
+        if self.identificar_pantalla(page) != "recepcionar":
+            self._ejecutar_paso(
+                "nuevo_contribuyente",
+                fase_nuevo,
+                destinos=("recepcionar", "datos_generales"),
+                max_intentos=2,
+                recuperar_menu=False,
+            )
+
+        self._ejecutar_paso(
+            "recepcionar",
+            lambda: self._recepcionar_documentacion(self._page_activa()),
+            destinos=("datos_generales",),
+            max_intentos=3,
+        )
+
+        self._ejecutar_paso(
+            "datos_generales",
+            lambda: self._datos_generales(self._page_activa(), doc),
+            destinos=("domicilio", "apoderado"),
+            max_intentos=3,
+        )
+
+        self._ejecutar_paso(
+            "domicilio",
+            lambda: self._domicilio_legal(self._page_activa(), doc),
+            destinos=("apoderado", "info_adicional", "imagenes"),
+            max_intentos=3,
+        )
+
+        # Apoderado puede ser nativo (ya dismiss) o HTML
+        self._paso_actual = "apoderado"
+        try:
+            self._cancelar_apoderado(self._page_activa())
+        except Exception as exc:
+            log.warning("Apoderado (no bloqueante): %s", exc)
+
+        self._ejecutar_paso(
+            "info_adicional",
+            lambda: self._info_adicional(self._page_activa(), doc),
+            destinos=("imagenes", "editar_foto", "confirmar"),
+            max_intentos=3,
+        )
+
+        self._ejecutar_paso(
+            "imagenes",
+            lambda: self._subir_fotografia(self._page_activa(), doc),
+            destinos=("confirmar", "editar_foto"),
+            max_intentos=3,
+        )
+
+        # Tras foto a veces queda en editar_foto hasta Finalizar; subir_fotografia ya lo maneja
+        if self.identificar_pantalla(self._page_activa()) == "editar_foto":
+            self._ejecutar_paso(
+                "editar_foto",
+                lambda: self._editar_fotografia_procesar(self._page_activa()),
+                destinos=("imagenes", "confirmar"),
+                max_intentos=2,
+            )
+
+        self._ejecutar_paso(
+            "confirmar",
+            lambda: self._confirmar_tramite_imprimir(self._page_activa()),
+            destinos=("confirmar",),
+            max_intentos=2,
+        )
+        self._paso_actual = "completado"
         log.info("Flujo RUAT completado (modo seguro — NO se pulsó Grabar)")
 
     # --- pasos ---
@@ -1586,6 +1654,17 @@ class RuatAutomator:
         page.wait_for_timeout(1000)
 
     def _datos_generales(self, page: Page, doc: dict) -> None:
+        page = self._page_activa()
+        try:
+            page = self._esperar_ui(
+                lambda p: self.identificar_pantalla(p) == "datos_generales"
+                or "datos generales" in self._page_text(p),
+                timeout_ms=12000,
+                desc="Datos Generales",
+            )
+        except Exception:
+            page = self._page_activa()
+
         dg = self.selectors.get("datos_generales") or {}
         self._fill_if_empty(page, dg.get("nombres", r"Nombre\(s\)|Nombres"), doc.get("nombres") or "")
         self._fill_if_empty(
@@ -1594,56 +1673,41 @@ class RuatAutomator:
         self._fill_if_empty(
             page, dg.get("segundo_apellido", "Segundo Apellido"), doc.get("segundo_apellido") or ""
         )
-        # Apellido Esposo: no llenar en MVP
 
         genero = (doc.get("genero") or "").upper()
         if "FEM" in genero:
-            g_label = dg.get("genero_femenino", "FEMENINO")
+            g_label = str(dg.get("genero_femenino", "FEMENINO"))
         elif genero:
-            g_label = dg.get("genero_masculino", "MASCULINO")
+            g_label = str(dg.get("genero_masculino", "MASCULINO"))
         else:
             g_label = ""
         if g_label:
-            try:
-                page.get_by_label(re.compile(str(g_label), re.I)).check(force=True)
-            except Exception:
-                t = page.get_by_text(re.compile(rf"^{re.escape(str(g_label))}$", re.I))
-                if t.count():
-                    t.first.click()
+            if not self._marcar_checkbox_por_texto(page, g_label, marcar=True):
+                # A veces es radio
+                for scope in self._scopes(page):
+                    try:
+                        t = scope.get_by_text(re.compile(rf"^{re.escape(g_label)}$", re.I))
+                        if t.count():
+                            t.first.click(force=True, timeout=4000)
+                            break
+                    except Exception:
+                        continue
 
         ec_raw = (doc.get("estado_civil") or "").upper().strip()
         ec_map = dg.get("estado_civil_map") or {}
         ec = ec_map.get(ec_raw) or ec_map.get(ec_raw.replace("(A)", "")) or ec_raw
         if ec:
-            label_ec = dg.get("estado_civil", "Estado Civil")
-            sel = page.get_by_label(re.compile(str(label_ec), re.I))
-            if sel.count() == 0:
-                sel = page.locator("select").filter(has_text=re.compile(r"SOLTERO|CASADO|Civil", re.I))
-            if sel.count():
-                try:
-                    sel.first.select_option(label=re.compile(re.escape(str(ec).split("(")[0]), re.I))
-                except Exception:
-                    try:
-                        sel.first.select_option(label=str(ec))
-                    except Exception:
-                        log.warning("No se pudo seleccionar estado civil %s", ec)
+            if not self._select_por_label(page, str(dg.get("estado_civil", "Estado Civil")), str(ec)):
+                log.warning("No se pudo seleccionar estado civil %s", ec)
 
         fecha = self._normalizar_fecha_dd_mm_aaaa(doc.get("fecha_nacimiento") or "")
-        self._fill_if_empty(
-            page,
-            dg.get("fecha_nacimiento", "Fecha Nacimiento"),
-            fecha,
-        )
-        # Departamento expedido en blanco — no tocar
-        # Número Documento / Tipo Documento suelen venir bloqueados
+        self._fill_if_empty(page, dg.get("fecha_nacimiento", "Fecha Nacimiento"), fecha)
 
         aceptar = dg.get("boton_aceptar", "^Aceptar$")
-        btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
-        if btn.count():
-            btn.first.click()
-            page.wait_for_timeout(800)
-        else:
+        if not self._click_boton_en_scopes(page, str(aceptar)):
             raise RuntimeError("No se encontró botón Aceptar en Datos Generales")
+        log.info("Datos Generales → Aceptar OK")
+        page.wait_for_timeout(800)
 
     @staticmethod
     def _normalizar_fecha_dd_mm_aaaa(valor: str) -> str:
@@ -1664,70 +1728,49 @@ class RuatAutomator:
         return v
 
     def _domicilio_legal(self, page: Page, doc: dict) -> None:
+        page = self._page_activa()
         dom = self.selectors.get("domicilio") or {}
 
-        # Paso obligatorio Riberalta: abrir Búsqueda Avanzada para área/tipo/nombre lugar
         ba = dom.get("busqueda_avanzada") or {}
         if ba.get("obligatorio", True):
             name = ba.get("link_name", "Búsqueda Avanzada")
-            link = page.get_by_role("link", name=re.compile(str(name), re.I))
-            if link.count() == 0:
-                link = page.get_by_text(re.compile(str(name), re.I))
-            if link.count():
-                link.first.click()
-                page.wait_for_timeout(900)
-                log.info("Abierta Búsqueda Avanzada de domicilio")
-                # Completar modal/pantalla de BA (calibración pendiente de capturas)
-                self._domicilio_busqueda_avanzada(page, doc)
-            else:
+            opened = False
+            for scope in self._scopes(page):
+                try:
+                    link = scope.get_by_role("link", name=re.compile(str(name), re.I))
+                    if link.count() == 0:
+                        link = scope.get_by_text(re.compile(str(name), re.I))
+                    if link.count():
+                        link.first.click(timeout=8000, force=True)
+                        opened = True
+                        break
+                except Exception:
+                    continue
+            if not opened:
                 raise RuntimeError("No se encontró link Búsqueda Avanzada en Domicilio Legal")
+            page.wait_for_timeout(900)
+            log.info("Abierta Búsqueda Avanzada de domicilio")
+            self._domicilio_busqueda_avanzada(self._page_activa(), doc)
 
-        # Tras Asociar, distrito/barrio/tipo/nombre ya vienen cargados.
-        # Número Puerta: del CI → llenar y NO marcar Sin Número.
-        # Si no hay número en el CI → marcar Sin Número (queda S/N).
-        # Dirección Descriptiva y Edificio: dejar en blanco.
+        page = self._page_activa()
         puerta = (doc.get("numero_puerta") or "").strip()
         label_puerta = dom.get("numero_puerta", "Número Puerta")
-        label_sin = dom.get("sin_numero", "Sin Número")
+        label_sin = str(dom.get("sin_numero", "Sin Número"))
 
         if puerta and puerta.upper() not in {"S/N", "SN", "SIN NUMERO", "SIN NÚMERO"}:
-            # Desmarcar Sin Número si estuviera marcado
-            try:
-                sn = page.get_by_label(re.compile(str(label_sin), re.I))
-                if sn.count() and sn.first.is_checked():
-                    sn.first.uncheck(force=True)
-            except Exception:
-                pass
-            self._fill_if_empty(page, label_puerta, puerta)
-            # Forzar fill aunque _fill_if_empty no encuentre label
-            try:
-                loc = page.get_by_label(re.compile(str(label_puerta), re.I))
-                if loc.count():
-                    loc.first.fill(puerta)
-            except Exception:
-                pass
+            self._marcar_checkbox_por_texto(page, label_sin, marcar=False)
+            self._fill_if_empty(page, str(label_puerta), puerta)
             log.info("Número Puerta desde CI: %s", puerta)
         else:
-            try:
-                sn = page.get_by_label(re.compile(str(label_sin), re.I))
-                if sn.count():
-                    if not sn.first.is_checked():
-                        sn.first.check(force=True)
-                else:
-                    page.get_by_text(re.compile(str(label_sin), re.I)).first.click()
-            except Exception:
+            if not self._marcar_checkbox_por_texto(page, label_sin, marcar=True):
                 log.warning("No se pudo marcar Sin Número")
             log.info("Sin número de puerta en CI → marcado Sin Número")
 
-        # No llenar Dirección Descriptiva ni datos de Edificio
         aceptar = dom.get("boton_aceptar", "^Aceptar$")
-        btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
-        if btn.count():
-            btn.first.scroll_into_view_if_needed()
-            btn.first.click()
-            page.wait_for_timeout(800)
-        else:
+        if not self._click_boton_en_scopes(page, str(aceptar)):
             raise RuntimeError("No se encontró botón Aceptar en Domicilio Legal")
+        log.info("Domicilio Legal → Aceptar OK")
+        page.wait_for_timeout(800)
 
     def _domicilio_busqueda_avanzada(self, page: Page, doc: dict) -> None:
         """
@@ -1736,6 +1779,7 @@ class RuatAutomator:
         2) En Resultados: Asociar fila con MISMO barrio Y MISMA avenida del CI
         3) Si no hay esa fila → Nombre=SIN NOMINAR → Buscar → Asociar BARRIO SIN NOMINAR + AVENIDA SIN NOMINAR
         """
+        page = self._page_activa()
         ba = (self.selectors.get("domicilio") or {}).get("busqueda_avanzada_form") or {}
         avenida = (doc.get("avenida") or "").strip()
         barrio = (doc.get("barrio") or "").strip()
@@ -1744,33 +1788,38 @@ class RuatAutomator:
         area = str(ba.get("area_default") or "URBANO")
         btn_buscar = str(ba.get("boton_buscar") or "^Buscar$")
 
-        try:
-            page.get_by_label(re.compile(area, re.I)).check(force=True)
-        except Exception:
-            t = page.get_by_text(re.compile(rf"^{re.escape(area)}$", re.I))
-            if t.count():
-                t.first.click()
+        if not self._marcar_checkbox_por_texto(page, area, marcar=True):
+            for scope in self._scopes(page):
+                try:
+                    t = scope.get_by_text(re.compile(rf"^{re.escape(area)}$", re.I))
+                    if t.count():
+                        t.first.click(force=True, timeout=4000)
+                        break
+                except Exception:
+                    continue
 
         label_tipo = ba.get("label_tipo_lugar", "Tipo Lugar")
-        tipo_sel = page.get_by_label(re.compile(str(label_tipo), re.I))
-        if tipo_sel.count() == 0:
-            tipo_sel = page.locator("select").first
-        if tipo_sel.count():
-            try:
-                tipo_sel.first.select_option(label=re.compile(tipo, re.I))
-            except Exception:
-                log.warning("No se pudo seleccionar Tipo Lugar=%s", tipo)
+        if not self._select_por_label(page, str(label_tipo), tipo):
+            log.warning("No se pudo seleccionar Tipo Lugar=%s", tipo)
 
         label_nombre = ba.get("label_nombre_lugar", "Nombre Lugar")
 
         def _set_nombre(valor: str) -> None:
-            loc = page.get_by_label(re.compile(str(label_nombre), re.I))
-            if loc.count() == 0:
-                loc = page.locator("input[type='text']").first
-            loc.first.fill(valor)
+            if not self._fill_if_empty(page, str(label_nombre), valor):
+                # Forzar aunque no esté vacío
+                for scope in self._scopes(page):
+                    try:
+                        loc = scope.get_by_label(re.compile(str(label_nombre), re.I))
+                        if loc.count():
+                            self._escribir_en_input(loc.first, valor, page)
+                            return
+                    except Exception:
+                        continue
+                raise RuntimeError(f"No se pudo escribir Nombre Lugar={valor}")
 
         def _click_buscar() -> None:
-            page.get_by_role("button", name=re.compile(btn_buscar, re.I)).click()
+            if not self._click_boton_en_scopes(page, btn_buscar):
+                raise RuntimeError("No se encontró Buscar en Búsqueda Avanzada")
             page.wait_for_timeout(1200)
 
         if not avenida:
@@ -1778,7 +1827,7 @@ class RuatAutomator:
         else:
             _set_nombre(avenida)
             _click_buscar()
-            if self._domicilio_asociar_barrio_avenida(page, barrio=barrio, avenida=avenida):
+            if self._domicilio_asociar_barrio_avenida(self._page_activa(), barrio=barrio, avenida=avenida):
                 log.info("Asociado barrio='%s' avenida='%s'", barrio, avenida)
                 return
             log.info(
@@ -1789,7 +1838,7 @@ class RuatAutomator:
 
         _set_nombre(fallback)
         _click_buscar()
-        if self._domicilio_asociar_sin_nominar(page):
+        if self._domicilio_asociar_sin_nominar(self._page_activa()):
             log.info("Asociado BARRIO SIN NOMINAR + AVENIDA SIN NOMINAR")
             return
 
@@ -1804,34 +1853,36 @@ class RuatAutomator:
         if not avenida:
             return False
 
-        rows = page.locator("table").locator("tr").filter(has_text=re.compile(re.escape(avenida), re.I))
-        if rows.count() == 0:
-            rows = page.locator("tr").filter(has_text=re.compile(re.escape(avenida), re.I))
-        if rows.count() == 0:
-            return False
-
         barrio_norm = self._norm_lugar(barrio)
-        for i in range(min(rows.count(), 40)):
-            row = rows.nth(i)
-            text = ""
+        for scope in self._scopes(page):
             try:
-                text = row.inner_text()
+                rows = scope.locator("table").locator("tr").filter(
+                    has_text=re.compile(re.escape(avenida), re.I)
+                )
+                if rows.count() == 0:
+                    rows = scope.locator("tr").filter(has_text=re.compile(re.escape(avenida), re.I))
+                if rows.count() == 0:
+                    continue
+                for i in range(min(rows.count(), 40)):
+                    row = rows.nth(i)
+                    try:
+                        text = row.inner_text(timeout=800) or ""
+                    except Exception:
+                        continue
+                    if avenida.upper() not in text.upper():
+                        continue
+                    if barrio_norm and barrio_norm not in self._norm_lugar(text):
+                        continue
+                    link = row.get_by_role("link", name=re.compile(asociar_re, re.I))
+                    if link.count() == 0:
+                        link = row.get_by_text(re.compile(asociar_re, re.I))
+                    if link.count():
+                        link.first.click(timeout=8000, force=True)
+                        page.wait_for_timeout(900)
+                        return True
             except Exception:
                 continue
-            # Debe contener la avenida; si hay barrio OCR, también debe coincidir
-            if avenida.upper() not in text.upper():
-                continue
-            if barrio_norm and barrio_norm not in self._norm_lugar(text):
-                continue
-            link = row.get_by_role("link", name=re.compile(asociar_re, re.I))
-            if link.count() == 0:
-                link = row.get_by_text(re.compile(asociar_re, re.I))
-            if link.count():
-                link.first.click()
-                page.wait_for_timeout(900)
-                return True
 
-        # Si no hay barrio OCR, no asociar la primera avenida a ciegas: exigir fallback
         if not barrio_norm:
             log.warning("Hay resultados de avenida pero sin barrio OCR para emparejar")
         return False
@@ -1839,20 +1890,24 @@ class RuatAutomator:
     def _domicilio_asociar_sin_nominar(self, page: Page) -> bool:
         ba = (self.selectors.get("domicilio") or {}).get("busqueda_avanzada_form") or {}
         asociar_re = str(ba.get("link_asociar") or "^Asociar$")
-        rows = page.locator("tr").filter(has_text=re.compile(r"SIN\s*NOMINAR", re.I))
-        prefer = rows.filter(has_text=re.compile(r"BARRIO", re.I)).filter(
-            has_text=re.compile(r"AVENIDA", re.I)
-        )
-        target = prefer if prefer.count() else rows
-        for i in range(min(target.count(), 20)):
-            row = target.nth(i)
-            link = row.get_by_role("link", name=re.compile(asociar_re, re.I))
-            if link.count() == 0:
-                link = row.get_by_text(re.compile(asociar_re, re.I))
-            if link.count():
-                link.first.click()
-                page.wait_for_timeout(900)
-                return True
+        for scope in self._scopes(page):
+            try:
+                rows = scope.locator("tr").filter(has_text=re.compile(r"SIN\s*NOMINAR", re.I))
+                prefer = rows.filter(has_text=re.compile(r"BARRIO", re.I)).filter(
+                    has_text=re.compile(r"AVENIDA", re.I)
+                )
+                target = prefer if prefer.count() else rows
+                for i in range(min(target.count(), 20)):
+                    row = target.nth(i)
+                    link = row.get_by_role("link", name=re.compile(asociar_re, re.I))
+                    if link.count() == 0:
+                        link = row.get_by_text(re.compile(asociar_re, re.I))
+                    if link.count():
+                        link.first.click(timeout=8000, force=True)
+                        page.wait_for_timeout(900)
+                        return True
+            except Exception:
+                continue
         return False
 
     @staticmethod
@@ -1869,50 +1924,67 @@ class RuatAutomator:
         «¿Desea registrar un Apoderado/Representante Legal?» → siempre Cancelar.
         Suele ser confirm nativo (manejado por _on_browser_dialog); esto es respaldo HTML.
         """
+        page = self._page_activa()
         page.wait_for_timeout(500)
         name = self._sel("apoderado", "boton_cancelar", default="^Cancelar$")
-        # Si el diálogo nativo ya se cerró, no hay nada que hacer
-        if page.get_by_text(re.compile(r"Apoderado|Representante\s*Legal", re.I)).count() == 0:
+
+        has_prompt = False
+        for scope in self._scopes(page):
+            try:
+                if scope.get_by_text(re.compile(r"Apoderado|Representante\s*Legal", re.I)).count():
+                    has_prompt = True
+                    break
+            except Exception:
+                continue
+        if not has_prompt:
             log.info("Sin prompt de apoderado visible (posible dismiss nativo ya aplicado)")
             return
 
-        dialog = page.get_by_role("dialog")
-        if dialog.count():
-            cancelar = dialog.get_by_role("button", name=re.compile(str(name), re.I))
-            if cancelar.count():
-                cancelar.first.click()
-                page.wait_for_timeout(500)
-                log.info("Apoderado → Cancelar (HTML dialog)")
-                return
-
-        cancelar = page.get_by_role("button", name=re.compile(str(name), re.I))
-        if cancelar.count():
-            cancelar.last.click()
+        if self._click_boton_en_scopes(page, str(name)):
             page.wait_for_timeout(500)
-            log.info("Apoderado → Cancelar (botón)")
+            log.info("Apoderado → Cancelar")
+            return
+
+        for scope in self._scopes(page):
+            try:
+                dialog = scope.get_by_role("dialog")
+                if dialog.count():
+                    cancelar = dialog.get_by_role("button", name=re.compile(str(name), re.I))
+                    if cancelar.count():
+                        cancelar.first.click(force=True, timeout=5000)
+                        page.wait_for_timeout(500)
+                        log.info("Apoderado → Cancelar (HTML dialog)")
+                        return
+            except Exception:
+                continue
+        log.warning("Prompt de apoderado visible pero no se pudo Cancelar")
 
     def _info_adicional(self, page: Page, doc: dict) -> None:
         """Solo *Teléfono Celular (aleatorio de la API); resto en blanco → Aceptar."""
+        page = self._page_activa()
         info = self.selectors.get("info_adicional") or {}
         celular = (doc.get("telefono_celular") or "").strip() or "78998541"
         label = info.get("celular", r"Teléfono Celular|Telefono Celular")
-        loc = page.get_by_label(re.compile(str(label), re.I))
-        if loc.count():
-            loc.first.fill(celular)
-        else:
-            self._fill_if_empty(page, str(label), celular)
+        if not self._fill_if_empty(page, str(label), celular):
+            # Forzar overwrite
+            for scope in self._scopes(page):
+                try:
+                    loc = scope.get_by_label(re.compile(str(label), re.I))
+                    if loc.count():
+                        self._escribir_en_input(loc.first, celular, page)
+                        break
+                except Exception:
+                    continue
         log.info("Celular aleatorio: %s", celular)
 
         aceptar = info.get("boton_aceptar", "^Aceptar$")
-        btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
-        if btn.count():
-            btn.first.click()
-            page.wait_for_timeout(700)
-        else:
+        if not self._click_boton_en_scopes(page, str(aceptar)):
             raise RuntimeError("No se encontró botón Aceptar en Información Adicional")
+        page.wait_for_timeout(700)
 
     def _subir_fotografia(self, page: Page, doc: dict) -> None:
         """Solo sección Fotografía (≤90 KB). Sin foto_url → continúa sin foto."""
+        page = self._page_activa()
         img = self.selectors.get("imagenes") or {}
         foto_cfg = img.get("fotografia") or {}
         url = doc.get("foto_url")
@@ -1931,45 +2003,49 @@ class RuatAutomator:
         else:
             log.info("Foto descargada (%s bytes)", size)
 
-        # Preferir el file input de la fila/sección Fotografía
         idx = int(foto_cfg.get("input_file_index", 0) or 0)
         file_input = None
-        seccion = page.locator("tr, div, table").filter(
-            has_text=re.compile(r"Fotogra", re.I)
-        ).filter(has=page.locator("input[type='file']"))
-        if seccion.count():
-            file_input = seccion.first.locator("input[type='file']").first
+        for scope in self._scopes(page):
+            try:
+                seccion = scope.locator("tr, div, table").filter(
+                    has_text=re.compile(r"Fotogra", re.I)
+                ).filter(has=scope.locator("input[type='file']"))
+                if seccion.count():
+                    cand = seccion.first.locator("input[type='file']").first
+                    if cand.count():
+                        file_input = cand
+                        break
+            except Exception:
+                continue
         if file_input is None or file_input.count() == 0:
             css = img.get("input_file", "input[type='file']")
-            file_input = page.locator(str(css)).nth(idx)
-        if file_input.count() == 0:
+            for scope in self._scopes(page):
+                try:
+                    cand = scope.locator(str(css)).nth(idx)
+                    if cand.count():
+                        file_input = cand
+                        break
+                except Exception:
+                    continue
+        if file_input is None or file_input.count() == 0:
             raise RuntimeError("No se encontró input Examinar de Fotografía")
 
-        # Importante: no interactuar con el diálogo Windows «Carga de archivos».
-        # set_input_files inyecta la foto del escaneo (foto_url), no una de la carpeta Imágenes.
         file_input.set_input_files(str(dest))
         page.wait_for_timeout(800)
         log.info("Fotografía del escaneo inyectada (sin diálogo Windows): %s", dest.name)
 
-        self._editar_fotografia_procesar(page)
-        self._aceptar_registrar_imagenes(page, img)
+        self._editar_fotografia_procesar(self._page_activa())
+        self._aceptar_registrar_imagenes(self._page_activa(), img)
 
     def _aceptar_registrar_imagenes(self, page: Page, img: dict | None = None) -> None:
         img = img or (self.selectors.get("imagenes") or {})
+        page = self._page_activa()
         page.wait_for_timeout(500)
         aceptar = img.get("boton_aceptar", "^Aceptar$")
-        btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
-        if btn.count() == 0:
-            page.keyboard.press("End")
-            page.wait_for_timeout(300)
-            btn = page.get_by_role("button", name=re.compile(str(aceptar), re.I))
-        if btn.count():
-            btn.last.scroll_into_view_if_needed()
-            btn.last.click()
+        if self._click_boton_en_scopes(page, str(aceptar)):
             page.wait_for_timeout(1000)
             log.info("Registrar Imágenes → Aceptar")
         else:
-            # Si no hay pantalla de imágenes (flujo corto), no bloquear
             log.warning("No se encontró Aceptar en Registrar Imágenes — continúo")
 
     def _confirmar_tramite_imprimir(self, page: Page) -> None:
@@ -1979,47 +2055,35 @@ class RuatAutomator:
         2) Grabar            ← NO (modo seguro: operador)
         3) Salir             ← operador
         """
+        page = self._page_activa()
         conf = self.selectors.get("confirmar_tramite") or {}
         page.wait_for_timeout(600)
-        titulo = page.get_by_text(re.compile(r"CONFIRMAR\s+TRAMITE", re.I))
-        if titulo.count() == 0:
-            log.warning("No se vio CONFIRMAR TRAMITE — puede que aún no haya llegado")
 
-        imprimir = page.get_by_role(
-            "button",
-            name=re.compile(str(conf.get("boton_imprimir", r"^Imprimir\s+Reporte$")), re.I),
-        )
-        if imprimir.count() == 0:
-            imprimir = page.get_by_text(re.compile(r"Imprimir\s+Reporte", re.I))
-        if imprimir.count():
-            # La impresión puede abrir diálogo del navegador; ya dismissamos confirms de apoderado.
-            # Para print, a veces hay que aceptar el diálogo de impresión — dejar que el SO maneje
-            # o cancelar el print dialog si aparece.
-            try:
-                with page.expect_event("popup", timeout=3000) as pop:
-                    imprimir.first.click()
-                popup = pop.value
-                popup.close()
-            except Exception:
-                imprimir.first.click()
-            page.wait_for_timeout(800)
-            log.info("CONFIRMAR TRAMITE → Imprimir Reporte (modo seguro: sin Grabar)")
-            log.info(
-                ">>> OPERADOR: revise el Reporte de Control de Datos, confirme con el contribuyente "
-                "y pulse Grabar en RUAT. Luego Salir."
-            )
-        else:
+        imprimir_rx = str(conf.get("boton_imprimir", r"^Imprimir\s+Reporte$"))
+        clicked = self._click_boton_en_scopes(page, imprimir_rx)
+        if not clicked:
+            for scope in self._scopes(page):
+                try:
+                    t = scope.get_by_text(re.compile(r"Imprimir\s+Reporte", re.I))
+                    if t.count():
+                        t.first.click(force=True, timeout=8000)
+                        clicked = True
+                        break
+                except Exception:
+                    continue
+        if not clicked:
             raise RuntimeError("No se encontró botón Imprimir Reporte")
 
-        # Explicitamente NO hacer clic en Grabar ni Salir en MVP
-        # Fase 2: GRABAR_AUTOMATICO=1 → pulsar Grabar tras Imprimir Reporte
+        page.wait_for_timeout(800)
+        log.info("CONFIRMAR TRAMITE → Imprimir Reporte (modo seguro: sin Grabar)")
+        log.info(
+            ">>> OPERADOR: revise el Reporte de Control de Datos, confirme con el contribuyente "
+            "y pulse Grabar en RUAT. Luego Salir."
+        )
+
         if os.getenv("GRABAR_AUTOMATICO", "").strip().lower() in {"1", "true", "yes"}:
-            grabar = page.get_by_role(
-                "button",
-                name=re.compile(str(conf.get("boton_grabar", "^Grabar$")), re.I),
-            )
-            if grabar.count():
-                grabar.first.click()
+            grabar = str(conf.get("boton_grabar", "^Grabar$"))
+            if self._click_boton_en_scopes(page, grabar):
                 page.wait_for_timeout(1000)
                 log.info("Fase 2: Grabar automático activado")
             else:
@@ -2031,58 +2095,231 @@ class RuatAutomator:
         """
         Pantalla EDITAR FOTOGRAFÍA: cuadro remarcado = área a conservar.
         MVP: si RUAT ya dibuja un recorte razonable, Pulsar Procesar.
-        (Ajuste fino del crop por drag queda pendiente si el default falla.)
         """
+        page = self._page_activa()
         edit = (self.selectors.get("imagenes") or {}).get("editar_fotografia") or {}
         page.wait_for_timeout(600)
+        procesar_rx = str(edit.get("boton_procesar", "^Procesar$"))
 
-        # Detectar pantalla de edición
-        en_edicion = page.get_by_text(re.compile(r"EDITAR\s+FOTOGRAF", re.I)).count() > 0
-        procesar = page.get_by_role("button", name=re.compile(str(edit.get("boton_procesar", "^Procesar$")), re.I))
-        if not en_edicion and procesar.count() == 0:
+        en_edicion = False
+        has_proc = False
+        for scope in self._scopes(page):
+            try:
+                if scope.get_by_text(re.compile(r"EDITAR\s+FOTOGRAF", re.I)).count():
+                    en_edicion = True
+                if scope.get_by_role("button", name=re.compile(procesar_rx, re.I)).count():
+                    has_proc = True
+            except Exception:
+                continue
+
+        if not en_edicion and not has_proc:
             log.info("No apareció EDITAR FOTOGRAFÍA — se continúa")
             return
 
         log.info("EDITAR FOTOGRAFÍA: usando cuadro remarcado (default RUAT) → Procesar")
-        if procesar.count():
-            procesar.first.click()
-            page.wait_for_timeout(1200)
-        else:
+        if not self._click_boton_en_scopes(page, procesar_rx):
             raise RuntimeError("No se encontró botón Procesar en Editar Fotografía")
+        page.wait_for_timeout(1200)
 
-        # Tras Procesar aparece panel EDITADO (imagen enmarcada) → Finalizar
-        editado = page.get_by_text(re.compile(r"^EDITADO$", re.I))
-        if editado.count() == 0:
-            page.wait_for_timeout(800)
-        finalizar = page.get_by_role(
-            "button", name=re.compile(str(edit.get("boton_finalizar", "^Finalizar$")), re.I)
-        )
-        if finalizar.count():
-            finalizar.first.click()
+        finalizar_rx = str(edit.get("boton_finalizar", "^Finalizar$"))
+        if self._click_boton_en_scopes(self._page_activa(), finalizar_rx):
             page.wait_for_timeout(1000)
             log.info("Fotografía enmarcada → Finalizar")
         else:
             raise RuntimeError("No se encontró botón Finalizar tras Procesar la fotografía")
 
-    def _fill_if_empty(self, page: Page, label_pattern: str, value: str) -> None:
+    def _fill_if_empty(self, page: Page, label_pattern: str, value: str) -> bool:
+        """Rellena input vacío por label (página + iframes). Devuelve True si escribió."""
         if not value:
-            return
-        loc = page.get_by_label(re.compile(str(label_pattern), re.I))
-        if loc.count() == 0:
-            loc = page.locator(f"text=/{label_pattern}/i >> xpath=..//input").first
-            if loc.count() == 0:
-                log.warning("Campo no encontrado: %s", label_pattern)
-                return
+            return False
+        label_rx = re.compile(str(label_pattern), re.I)
+        css = "input[type='text'], input:not([type]), input[type=''], input[type='search'], input[type='tel']"
+
+        for scope in self._scopes(page):
+            # 1) get_by_label
             try:
-                current = loc.input_value()
+                loc = scope.get_by_label(label_rx)
+                if loc.count():
+                    el = loc.first
+                    try:
+                        current = (el.input_value(timeout=1500) or "").strip()
+                    except Exception:
+                        current = ""
+                    if current:
+                        return True
+                    if self._escribir_en_input(el, value, page):
+                        return True
             except Exception:
-                current = ""
-            if not (current or "").strip():
-                loc.fill(value)
-            return
-        try:
-            current = loc.first.input_value()
-        except Exception:
-            current = ""
-        if not (current or "").strip():
-            loc.first.fill(value)
+                pass
+
+            # 2) Fila con el texto del label → input
+            try:
+                filas = scope.locator("tr, label, div, td").filter(has_text=label_rx)
+                n = min(filas.count(), 6)
+                for i in range(n):
+                    fila = filas.nth(i)
+                    try:
+                        txt = (fila.inner_text(timeout=600) or "").strip()
+                        if len(txt) > 100:
+                            continue
+                    except Exception:
+                        continue
+                    el = self._input_texto_visible(fila, css, 0)
+                    if el is None:
+                        continue
+                    try:
+                        current = (el.input_value(timeout=1500) or "").strip()
+                    except Exception:
+                        current = ""
+                    if current:
+                        return True
+                    if self._escribir_en_input(el, value, page):
+                        return True
+            except Exception:
+                continue
+
+        # 3) JS por frames
+        js = """
+        ([labelRe, valor]) => {
+          const re = new RegExp(labelRe, 'i');
+          const okType = (t) => {
+            t = (t || 'text').toLowerCase();
+            return ['text','','search','tel','number'].includes(t);
+          };
+          const inputs = Array.from(document.querySelectorAll('input')).filter(
+            (i) => okType(i.type) && i.offsetParent !== null && !i.disabled
+          );
+          for (const inp of inputs) {
+            const row = inp.closest('tr') || inp.parentElement;
+            const txt = ((row && row.innerText) || '');
+            if (!re.test(txt)) continue;
+            if ((inp.value || '').trim()) return { ok: true, already: true, value: inp.value };
+            inp.focus();
+            inp.value = valor;
+            for (const ev of ['input', 'change', 'keyup']) {
+              try { inp.dispatchEvent(new Event(ev, { bubbles: true })); } catch (e) {}
+            }
+            return { ok: true, value: inp.value, name: inp.name || '' };
+          }
+          return { ok: false };
+        }
+        """
+        # Convertir patrón tipo Nombre\\(s\\)|Nombres a string usable en RegExp JS (simple)
+        label_js = str(label_pattern).replace("\\\\", "\\")
+        for scope in self._scopes(page):
+            try:
+                res = scope.evaluate(js, [label_js, value])
+                if isinstance(res, dict) and res.get("ok"):
+                    log.info("Campo «%s» escrito (js) → %r", label_pattern, res.get("value"))
+                    return True
+            except Exception:
+                continue
+
+        log.warning("Campo no encontrado o no escrito: %s", label_pattern)
+        return False
+
+    def _select_por_label(self, page: Page, label_pattern: str, option_label: str) -> bool:
+        """Selecciona opción en <select> por label (scopes)."""
+        label_rx = re.compile(str(label_pattern), re.I)
+        opt_rx = re.compile(re.escape(str(option_label).split("(")[0]), re.I)
+        for scope in self._scopes(page):
+            try:
+                sel = scope.get_by_label(label_rx)
+                if sel.count() == 0:
+                    continue
+                try:
+                    sel.first.select_option(label=opt_rx, timeout=5000)
+                    return True
+                except Exception:
+                    try:
+                        sel.first.select_option(label=str(option_label), timeout=5000)
+                        return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        # Fallback: select que contenga la opción
+        for scope in self._scopes(page):
+            try:
+                sel = scope.locator("select").filter(has_text=opt_rx)
+                if sel.count():
+                    sel.first.select_option(label=opt_rx, timeout=5000)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _esperar_alguna_pantalla(self, destinos: tuple[str, ...] | list[str], timeout_ms: int = 15000) -> bool:
+        """Espera hasta que identificar_pantalla sea uno de destinos."""
+        deadline = time.time() + timeout_ms / 1000.0
+        wanted = set(destinos)
+        while time.time() < deadline:
+            page = self._page_activa()
+            pant = self.identificar_pantalla(page)
+            if pant in wanted:
+                return True
+            try:
+                page.wait_for_timeout(400)
+            except Exception:
+                time.sleep(0.4)
+        return False
+
+    def _ejecutar_paso(
+        self,
+        paso: str,
+        accion,
+        destinos: tuple[str, ...] | list[str],
+        *,
+        max_intentos: int = 3,
+        recuperar_menu: bool = False,
+    ) -> Page:
+        """
+        Ejecuta un paso con reintentos y verificación de pantalla destino.
+        Si falla: RuntimeError con paso + pantalla (para la API).
+        """
+        self._paso_actual = paso
+        last_err: Exception | None = None
+        for intento in range(1, max_intentos + 1):
+            page = self._page_activa()
+            pant = self.identificar_pantalla(page)
+            self._ultima_pantalla = pant
+            log.info(
+                "paso=%s intento=%s/%s pantalla=%s url=%s",
+                paso,
+                intento,
+                max_intentos,
+                pant,
+                (page.url or "")[:100],
+            )
+            try:
+                accion()
+                if self._esperar_alguna_pantalla(destinos, timeout_ms=16000):
+                    page = self._page_activa()
+                    self._ultima_pantalla = self.identificar_pantalla(page)
+                    log.info("paso=%s OK → pantalla=%s", paso, self._ultima_pantalla)
+                    return page
+                pant_after = self.identificar_pantalla(self._page_activa())
+                last_err = RuntimeError(
+                    f"Tras «{paso}» esperaba {list(destinos)} y quedé en «{pant_after}»"
+                )
+                log.warning("%s", last_err)
+            except Exception as exc:
+                last_err = exc
+                log.warning("Fallo paso «%s»: %s", paso, exc)
+
+            if intento < max_intentos and recuperar_menu:
+                try:
+                    log.info("Recuperación: forzando menú principal…")
+                    self._forzar_menu_principal()
+                except Exception as rec:
+                    log.warning("No se pudo forzar menú: %s", rec)
+
+        page = self._page_activa()
+        pant = self.identificar_pantalla(page)
+        self._ultima_pantalla = pant
+        detalle = str(last_err) if last_err else "sin detalle"
+        raise RuntimeError(
+            f"Paso «{paso}» falló (pantalla={pant}). "
+            "Cierre el trámite a medias en RUAT o vuelva al menú principal y use Reintentar envío. "
+            f"Detalle: {detalle[:280]}"
+        )
