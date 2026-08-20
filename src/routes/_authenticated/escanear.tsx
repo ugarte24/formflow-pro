@@ -41,6 +41,8 @@ function Escanear() {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [calidad, setCalidad] = useState<Calidad>({ nitidez: 0, luz: 0, ok: false });
   const [paso, setPaso] = useState("");
+  /** Frame congelado del CI (solo vista; no se sube a Storage). */
+  const [previewCi, setPreviewCi] = useState<string | null>(null);
 
   const detener = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -72,11 +74,13 @@ function Escanear() {
 
   useEffect(() => {
     // Siempre camara trasera: CI y fotografia del contribuyente
+    setPreviewCi(null);
     void iniciarCamara("environment");
     return () => detener();
   }, [fase, iniciarCamara, detener]);
 
   const medirCalidad = useCallback(() => {
+    if (previewCi) return;
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return;
     const c = document.createElement("canvas");
@@ -109,15 +113,15 @@ function Escanear() {
     const ok = nitidez > 0.3 && luz > 0.25 && luz < 0.92;
     setCalidad({ nitidez, luz, ok });
     return ok;
-  }, []);
+  }, [previewCi]);
 
   useEffect(() => {
-    if (estado !== "listo" || fase !== "ci") return;
+    if (estado !== "listo" || fase !== "ci" || previewCi) return;
     const id = window.setInterval(() => {
       medirCalidad();
     }, 450);
     return () => window.clearInterval(id);
-  }, [estado, medirCalidad, fase]);
+  }, [estado, medirCalidad, fase, previewCi]);
 
   async function dibujarFrame(): Promise<HTMLCanvasElement> {
     const video = videoRef.current;
@@ -138,27 +142,24 @@ function Escanear() {
     setEstado("procesando");
     setMensaje(null);
     try {
-      setPaso("Preparando imagen del documento…");
+      // Congelar al instante: ya no hace falta seguir enfocando
       const canvas = await dibujarFrame();
       const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
+      setPreviewCi(dataUrl);
       const base64 = dataUrl.split(",")[1] ?? "";
-      const blob = await (await fetch(dataUrl)).blob();
 
-      setPaso("Guardando documento…");
-      const nombre = `${sesion.userId}/${Date.now()}-ci.jpg`;
-      const { error: upErr } = await supabase.storage.from("documentos").upload(nombre, blob, {
-        contentType: "image/jpeg",
-      });
-      if (upErr) throw upErr;
-
+      setPaso("Leyendo el documento…");
       const { data: doc, error: insErr } = await supabase
         .from("documents")
-        .insert({ operator_id: sesion.userId, image_path: nombre, status: "procesando" })
+        .insert({
+          operator_id: sesion.userId,
+          image_path: null,
+          status: "procesando",
+        })
         .select("id")
         .single();
       if (insErr) throw insErr;
 
-      setPaso("Leyendo el documento…");
       const resultado = await extraer({ data: { imageBase64: base64, mimeType: "image/jpeg" } });
 
       const bajaConfianza = Object.values(resultado.confianza).some((v) => v < 0.85);
@@ -176,13 +177,15 @@ function Escanear() {
         document_id: doc.id,
         operator_id: sesion.userId,
         evento: "OCR completado",
-        detalle: `Calidad: ${resultado.calidadImagen} · ${resultado.processingMs} ms`,
+        detalle: `Calidad: ${resultado.calidadImagen} · ${resultado.processingMs} ms · CI no guardado`,
       });
 
       setDocId(doc.id);
+      setPreviewCi(null);
       setFase("foto");
       toast.success("Documento leído. Ahora capture la fotografía.");
     } catch (error) {
+      setPreviewCi(null);
       setEstado("listo");
       const texto = error instanceof Error ? error.message : "No se pudo procesar la captura";
       setMensaje(texto);
@@ -254,22 +257,40 @@ function Escanear() {
             playsInline
             muted
             autoPlay
-            className="absolute inset-0 h-full w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover ${previewCi ? "invisible" : ""}`}
           />
+          {previewCi ? (
+            <img
+              src={previewCi}
+              alt="Documento capturado"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : null}
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 sm:p-5">
             <div
               className={`border-2 border-dashed transition-colors ${
                 fase === "ci"
-                  ? `h-[78%] w-[90%] max-w-lg rounded-xl ${calidad.ok ? "border-success" : "border-primary-foreground/40"}`
+                  ? `h-[78%] w-[90%] max-w-lg rounded-xl ${
+                      previewCi
+                        ? "border-success"
+                        : calidad.ok
+                          ? "border-success"
+                          : "border-primary-foreground/40"
+                    }`
                   : "h-[70%] w-[70%] max-w-[320px] rounded-full border-primary-foreground/50"
               }`}
             />
           </div>
 
           {estado === "procesando" ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/80 text-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink/55 text-center">
               <Loader2 className="h-7 w-7 animate-spin text-primary-foreground" />
               <p className="text-sm font-medium text-primary-foreground">{paso || "Procesando…"}</p>
+              {previewCi ? (
+                <p className="max-w-xs px-4 text-xs text-primary-foreground/80">
+                  Imagen congelada — ya puede bajar el documento
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
