@@ -5,7 +5,7 @@ import { Search, ChevronRight } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
-import { EN_CURSO, PENDIENTES, STATUS_META, TONE_CLASS, type DocStatus } from "@/lib/document-fields";
+import { EN_CURSO, PENDIENTES, TONE_CLASS, statusMetaFor } from "@/lib/document-fields";
 
 export const Route = createFileRoute("/_authenticated/historial")({
   head: () => ({
@@ -36,7 +36,7 @@ function Historial() {
     queryFn: async () => {
       let q = supabase
         .from("documents")
-        .select("id, numero_documento, nombres, apellidos, status, created_at")
+        .select("id, numero_documento, nombres, apellidos, status, error_message, created_at")
         .order("created_at", { ascending: false })
         .limit(100);
       if (filtro === "pendientes") q = q.in("status", PENDIENTES);
@@ -90,7 +90,7 @@ function Historial() {
         ) : (
           <ul className="divide-y divide-border">
             {lista.map((d) => {
-              const meta = STATUS_META[d.status as DocStatus];
+              const meta = statusMetaFor(d.status, d.error_message);
               return (
                 <li key={d.id}>
                   <Link

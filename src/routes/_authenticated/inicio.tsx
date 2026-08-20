@@ -4,7 +4,7 @@ import { Camera, ChevronRight, Clock, CheckCircle2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { useSesion } from "@/hooks/useSesion";
 import { supabase } from "@/integrations/supabase/client";
-import { PENDIENTES, STATUS_META, TONE_CLASS, type DocStatus } from "@/lib/document-fields";
+import { PENDIENTES, TONE_CLASS, statusMetaFor } from "@/lib/document-fields";
 
 export const Route = createFileRoute("/_authenticated/inicio")({
   head: () => ({
@@ -39,7 +39,7 @@ function Inicio() {
           .gte("created_at", hoy.toISOString()),
         supabase
           .from("documents")
-          .select("id, numero_documento, nombres, apellidos, status, created_at")
+          .select("id, numero_documento, nombres, apellidos, status, error_message, created_at")
           .order("created_at", { ascending: false })
           .limit(5),
       ]);
@@ -97,7 +97,7 @@ function Inicio() {
         ) : (
           <ul className="divide-y divide-border">
             {resumen?.recientes.map((d) => {
-              const meta = STATUS_META[d.status as DocStatus];
+              const meta = statusMetaFor(d.status, d.error_message);
               return (
                 <li key={d.id}>
                   <Link

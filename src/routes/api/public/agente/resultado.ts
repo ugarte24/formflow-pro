@@ -4,7 +4,13 @@ import { autorizarAgente } from "@/lib/agente-auth";
 
 const Esquema = z.object({
   documentId: z.string().uuid(),
-  estado: z.enum(["formulario_completado", "registrado", "error_automatizacion", "error_sistema"]),
+  estado: z.enum([
+    "formulario_completado",
+    "registrado",
+    "ya_registrado",
+    "error_automatizacion",
+    "error_sistema",
+  ]),
   mensaje: z.string().max(500).optional(),
 });
 
@@ -42,12 +48,14 @@ export const Route = createFileRoute("/api/public/agente/resultado")({
           return json({ error: "Documento no encontrado" }, 404);
         }
 
+        const esError = estado.startsWith("error");
+        const guardarMensaje = esError || estado === "ya_registrado";
         const { error } = await supabaseAdmin
           .from("documents")
           .update({
             status: estado,
-            error_message: estado.startsWith("error") ? (mensaje ?? "Error en el agente") : null,
-            completed_at: estado.startsWith("error") ? null : new Date().toISOString(),
+            error_message: guardarMensaje ? (mensaje ?? (esError ? "Error en el agente" : null)) : null,
+            completed_at: esError ? null : new Date().toISOString(),
           })
           .eq("id", documentId);
         if (error) return json({ error: error.message }, 500);

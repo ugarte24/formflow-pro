@@ -206,7 +206,7 @@ def main() -> int:
                         status["text"] = f"Listo CI {ci} — revise Grabar en RUAT"
                     except ContribuyenteYaRegistrado as ya:
                         log.warning("CI ya registrado: %s", ya.mensaje)
-                        api.resultado(doc_id, "error_automatizacion", ya.mensaje[:500])
+                        api.resultado(doc_id, "ya_registrado", ya.mensaje[:500])
                         status["text"] = f"CI {ci} ya registrado"
                     except DatosOcrInvalidos as datos:
                         log.warning("OCR inválido: %s", datos.mensaje)

@@ -240,6 +240,7 @@ export type Database = {
         | "enviado_pc"
         | "formulario_completado"
         | "registrado"
+        | "ya_registrado"
         | "error_ocr"
         | "error_conexion"
         | "error_automatizacion"
@@ -382,6 +383,7 @@ export const Constants = {
         "enviado_pc",
         "formulario_completado",
         "registrado",
+        "ya_registrado",
         "error_ocr",
         "error_conexion",
         "error_automatizacion",

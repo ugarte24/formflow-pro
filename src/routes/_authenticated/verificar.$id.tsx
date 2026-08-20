@@ -7,7 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { supabase } from "@/integrations/supabase/client";
 import { useSesion } from "@/hooks/useSesion";
 import { canvasToJpegUnderLimit } from "@/lib/image-compress";
-import { CAMPOS, STATUS_META, TONE_CLASS, confianzaTone, type DocStatus } from "@/lib/document-fields";
+import { CAMPOS, TONE_CLASS, confianzaTone, esYaRegistradoMunicipio, statusMetaFor } from "@/lib/document-fields";
 
 export const Route = createFileRoute("/_authenticated/verificar/$id")({
   head: () => ({
@@ -149,9 +149,10 @@ function Verificar() {
 
   const confianza = (doc?.confianza ?? {}) as Record<string, number>;
   const revisar = CAMPOS.filter((c) => (confianza[c.key] ?? 0) < 0.85 || !valores[c.key]);
-  const meta = doc ? STATUS_META[doc.status as DocStatus] : null;
+  const meta = doc ? statusMetaFor(doc.status, doc.error_message) : null;
   const bloqueado = !!doc && ["confirmado", "enviado_pc", "formulario_completado", "registrado"].includes(doc.status);
   const puedeReintentar = !!doc && (doc.status === "confirmado" || doc.status === "enviado_pc");
+  const yaRegistrado = !!doc && esYaRegistradoMunicipio(doc.status, doc.error_message);
 
   const { data: fotoUrl } = useQuery({
     queryKey: ["foto-url", doc?.foto_path],
@@ -267,39 +268,30 @@ function Verificar() {
       }
     >
       {doc.error_message && !bloqueado ? (
-        (() => {
-          const yaRegistrado = /ya tiene un registro|ya registrado en riberalta/i.test(
-            doc.error_message,
-          );
-          return (
-            <div
-              className={`mb-4 flex items-start gap-2.5 rounded-xl border px-4 py-3 ${
-                yaRegistrado
-                  ? "border-warning/40 bg-warning/15"
-                  : "border-destructive/40 bg-destructive/10"
-              }`}
-            >
-              <AlertTriangle
-                className={`mt-0.5 h-4 w-4 shrink-0 ${
-                  yaRegistrado ? "text-warning-foreground" : "text-destructive"
-                }`}
-              />
-              <div
-                className={`text-sm ${yaRegistrado ? "text-warning-foreground" : "text-destructive"}`}
-              >
-                <p className="font-semibold">
-                  {yaRegistrado ? "Ya registrado en Riberalta" : "Error del agente"}
-                </p>
-                <p className="mt-0.5 text-xs opacity-90">{doc.error_message}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {yaRegistrado
-                    ? "No se inició un alta nueva. En RUAT use Modificación Contribuyente Natural si corresponde."
-                    : "Corrija si hace falta y vuelva a enviar al PC."}
-                </p>
-              </div>
-            </div>
-          );
-        })()
+        <div
+          className={`mb-4 flex items-start gap-2.5 rounded-xl border px-4 py-3 ${
+            yaRegistrado
+              ? "border-warning/40 bg-warning/15"
+              : "border-destructive/40 bg-destructive/10"
+          }`}
+        >
+          <AlertTriangle
+            className={`mt-0.5 h-4 w-4 shrink-0 ${
+              yaRegistrado ? "text-warning-foreground" : "text-destructive"
+            }`}
+          />
+          <div className={`text-sm ${yaRegistrado ? "text-warning-foreground" : "text-destructive"}`}>
+            <p className="font-semibold">
+              {yaRegistrado ? "Ya registrado en Riberalta" : "Error del agente"}
+            </p>
+            <p className="mt-0.5 text-xs opacity-90">{doc.error_message}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {yaRegistrado
+                ? "No se inició un alta nueva. En RUAT use Modificación Contribuyente Natural si corresponde."
+                : "Corrija si hace falta y vuelva a enviar al PC."}
+            </p>
+          </div>
+        </div>
       ) : null}
 
       {bloqueado ? (
